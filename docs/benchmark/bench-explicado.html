@@ -241,11 +241,11 @@ bench-&lt;runtime&gt;
 user:   Explique em duas frases a diferenca entre RAM do sistema e VRAM da GPU...
 </code></pre>
 <p>No <code>independent</code>, cada requisição continua curta e sem histórico:</p>
-<pre><code class="language-text">POST 1 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 1
-POST 2 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 2
-POST 3 → [user: &quot;Explique de forma objetiva este conceito...&quot; ] → resposta 3
+<pre><code class="language-text">POST 1 → [user: &quot;word17 word83 ... Explique de forma objetiva...&quot; ] → resposta 1
+POST 2 → [user: &quot;word42 word11 ... Explique de forma objetiva...&quot; ] → resposta 2
+POST 3 → [user: &quot;word08 word65 ... Explique de forma objetiva...&quot; ] → resposta 3
 </code></pre>
-<p>Mesmo que a resposta 1 fale sobre VRAM, ela não aparece no POST 2. A entrada é controlada pelo tamanho do cenário, e não pela conversa.</p>
+<p>Mesmo que a resposta 1 fale sobre VRAM, ela não aparece no POST 2. Cada requisição recebe um marcador determinístico próprio, preservando exatamente o tamanho-alvo do cenário. Warmup e medição usam sementes disjuntas para evitar que o conjunto medido seja apresentado integralmente durante o aquecimento.</p>
 <p>No <code>replay</code>, cada turno cresce com o histórico fixo:</p>
 <pre><code class="language-text">turno 1 → [system, user_1]
 turno 2 → [system, user_1, assistant_1_fixo, user_2]
@@ -311,7 +311,7 @@ requisição 50: histórico até user 50
 </ul>
 <p>Essa é uma <strong>sonda de primeira resposta</strong>, registrada em <code>first-request.json</code> e no lifecycle. Ela não é misturada ao p50 da fase <code>measure</code>.</p>
 <h3 id="4-warmup">4. Warmup</h3>
-<p>O warmup envia requisições reais antes da medição formal, usando <code>WARMUP_CONVERSATION_FIXTURE</code>, uma fixture separada da medição. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.</p>
+<p>O warmup envia requisições reais antes da medição formal. Nos modos conversacionais, usa <code>WARMUP_CONVERSATION_FIXTURE</code>, uma fixture separada da medição; no modo <code>independent</code>, usa sementes distintas das requisições medidas. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.</p>
 <p>Warmup não é TTFT:</p>
 <pre><code class="language-text">TTFT  = uma métrica: POST → primeiro conteúdo daquela requisição
 warmup = uma fase: requisições usadas para preparar o estado do processo

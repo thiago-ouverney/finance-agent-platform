@@ -153,7 +153,7 @@ HTTP/SSE ⇄ runtime ⇄ modelo/GPU
 </tr>
 <tr>
 <td><code>synthetic_text</code></td>
-<td>Texto repetível por seed; não é dataset de avaliação semântica.</td>
+<td>Referência de configuração do cenário; no modo <code>independent</code>, a carga medida é gerada localmente com um prompt determinístico único por requisição.</td>
 </tr>
 <tr>
 <td><code>num_workers=0</code>, <code>shuffle=False</code></td>
@@ -191,7 +191,7 @@ HTTP/SSE ⇄ runtime ⇄ modelo/GPU
 <p>Exige exatamente um benchmark GuideLLM no bloco. Separa requisições bem-sucedidas, com erro e incompletas; percentis só usam sucessos. Grava nomes longos como <code>request_first_token_latency_milliseconds_p50</code>, <code>request_latency_seconds_p95</code> e <code>decode_generation_tokens_per_second_p99</code>, além de <code>sample_count</code> por métrica. Também grava <code>statistics.percentiles_by_metric</code>, com p05, p50, p95 e p99, a definição da interpolação e a indicação de que caudas com menos de 100 sucessos são exploratórias. O primeiro-token é medido uma vez em cada requisição; <code>within_response_next_token_latency_milliseconds</code> descreve os intervalos entre tokens sucessivos da mesma resposta. O agrupamento externo preserva <code>phase</code>, <code>scenario</code> e <code>repetition</code>, portanto os resultados de short, medium e long ficam separados.</p>
 <p>Gera ainda <code>requests_sha256</code> a partir de mensagens e <code>max_tokens</code>, não do alias do modelo ou chave. Esse hash ajuda a comparar a carga realmente registrada, mas só usa requisições bem-sucedidas: falhas precisam ser examinadas antes. Marca <code>p95_exploratory=True</code> abaixo de 100 sucessos; 100 não é garantia estatística de precisão.</p>
 <h3 id="write_requests_csvpath-report"><code>write_requests_csv(path, report)</code></h3>
-<p>Grava uma linha por requisição, inclusive falhas e incompletas. Para sucessos, inclui TTFT, duração, ITL, contagens, duas taxas, contexto inicial/final e faixa. Taxas de falhas não são usadas como velocidades válidas. Os JSONs brutos preservam detalhes que o CSV compacto não inclui.</p>
+<p>Grava uma linha por requisição, inclusive falhas e incompletas. Para sucessos, inclui TTFT, duração, ITL, contagens, duas taxas, contexto inicial/final e faixa. No modo <code>independent</code>, <code>workload_seed</code> identifica a semente efetiva do prompt. Taxas de falhas não são usadas como velocidades válidas. Os JSONs brutos preservam detalhes que o CSV compacto não inclui.</p>
 <h3 id="write_summaryoutput-rows"><code>write_summary(output, rows)</code></h3>
 <p>Salva resumo JSON e, havendo linhas, CSV. Chama <code>reporting.render</code> para HTML integrado e resumos auxiliares. Mesmo sem blocos concluídos, o HTML pode mostrar falha/inicialização; não precisa perder a primeira requisição só porque GuideLLM não começou.</p>
 <h2 id="6-runargs-a-execucao-principal-em-ordem">6. <code>run(args)</code>: a execução principal em ordem</h2>
@@ -206,7 +206,7 @@ HTTP/SSE ⇄ runtime ⇄ modelo/GPU
 <li>Aguarda API por GET. Nenhum POST de inferência foi enviado por este cliente.</li>
 <li>Envia primeira requisição própria cronometrada. Ela também valida stream e usage; é medição, não aquecimento descartado.</li>
 <li>Importa GuideLLM e percorre repetições. Rotaciona ordem dos cenários para reduzir efeito fixo de posição, sem prometer eliminar tendências.</li>
-<li>Para cada cenário: roda bloco <code>warmup</code>, depois <code>measure</code>. Seeds do aquecimento recebem deslocamento de 1.000.000 para não usar exatamente a mesma carga.</li>
+<li>Para cada cenário: roda bloco <code>warmup</code>, depois <code>measure</code>. Seeds do aquecimento recebem deslocamento de 1.000.000 e o índice da requisição compõe a semente efetiva; assim warmup e medição usam conjuntos disjuntos, mantendo o mesmo tamanho-alvo.</li>
 <li>Executa GuideLLM via <code>asyncio.run</code>, salva bruto, CSV individual e resumo parcial. Verifica contagem de sucessos, erros e incompletas; discrepância interrompe a bateria com falha.</li>
 <li>Repete o prompt inicial com o observador próprio como referência aquecida. Pode aproveitar prefix caching se habilitado; não atribua toda melhora a kernels.</li>
 <li>Marca <code>complete</code> apenas se todas essas etapas passaram.</li>

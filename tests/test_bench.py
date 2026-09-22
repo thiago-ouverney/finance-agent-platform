@@ -20,6 +20,65 @@ class UnitTests(unittest.TestCase):
 
         self.assertEqual(bench.estimate_messages_tokens(FakeTokenizer(), [{"role": "user", "content": "x"}]), 4)
 
+    def test_synthetic_prompts_are_exact_reproducible_and_distinct(self):
+        class FakeTokenizer:
+            def encode(self, text, add_special_tokens=False):
+                return text.split()
+
+            def decode(self, ids, skip_special_tokens=False):
+                return " ".join(ids)
+
+        tokenizer = FakeTokenizer()
+        first = bench._synthetic_prompt(tokenizer, 32, "42:0")
+        repeated = bench._synthetic_prompt(tokenizer, 32, "42:0")
+        second = bench._synthetic_prompt(tokenizer, 32, "42:1")
+
+        self.assertEqual(first, repeated)
+        self.assertNotEqual(first, second)
+        self.assertEqual(len(tokenizer.encode(first)), 32)
+        self.assertEqual(len(tokenizer.encode(second)), 32)
+
+    def test_independent_batch_uses_one_prompt_per_request(self):
+        class FakeTokenizer:
+            def encode(self, text, add_special_tokens=False):
+                return text.split()
+
+            def decode(self, ids, skip_special_tokens=False):
+                return " ".join(ids)
+
+        calls = []
+        original = bench.stream_request
+
+        def fake_stream(cfg, prompt, timeout, secret=""):
+            calls.append(prompt)
+            return {"request_args": json.dumps({"body": {"messages": [
+                {"role": "user", "content": prompt}], "max_tokens": bench.OUTPUT_TOKENS}})}
+
+        bench.stream_request = fake_stream
+        bench.WORKLOADS["unit-independent"] = 24
+        try:
+            report = bench.run_stream_batch({}, FakeTokenizer(), "unit-independent", 3, 1, seed=42)
+        finally:
+            bench.stream_request = original
+            bench.WORKLOADS.pop("unit-independent", None)
+
+        self.assertEqual(len(set(calls)), 3)
+        self.assertTrue(all(len(prompt.split()) == 24 for prompt in calls))
+        rows = report["benchmarks"][0]["requests"]["successful"]
+        self.assertEqual([row["workload_seed"] for row in rows], ["42:0", "42:1", "42:2"])
+
+        warmup_calls = []
+        bench.stream_request = lambda cfg, prompt, timeout, secret="": (
+            warmup_calls.append(prompt) or {"request_args": json.dumps({"body": {
+                "messages": [{"role": "user", "content": prompt}], "max_tokens": bench.OUTPUT_TOKENS}})})
+        bench.WORKLOADS["unit-independent"] = 24
+        try:
+            bench.run_stream_batch({}, FakeTokenizer(), "unit-independent", 3, 1, seed=1_000_042)
+        finally:
+            bench.stream_request = original
+            bench.WORKLOADS.pop("unit-independent", None)
+        self.assertTrue(set(calls).isdisjoint(warmup_calls))
+
     def test_percentiles(self):
         self.assertEqual(bench.percentile([1, 2, 3], .5), 2)
         self.assertAlmostEqual(bench.percentile([1, 2, 3], .95), 2.9)

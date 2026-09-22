@@ -36,7 +36,7 @@ O próprio GuideLLM gera texto sintético com um tokenizer fixado. Usamos aproxi
 
 Esses números são **nosso desenho**, não limites oficiais de classificação de chatbot. Tokens de template e mensagens de sistema podem aumentar a entrada total. O servidor devolve as contagens reais, que devem ser analisadas.
 
-O benchmark atual usa uma fixture replay validada no repositório, com 50 perguntas técnicas em português e histórico determinístico crescente. Cada requisição é uma conversa nova reconstruída a partir dos turnos fixos; a resposta real do runtime não altera o próximo request. O cenário longo continua representando uma carga de contexto sintética separada do eixo conversacional. O warmup usa outra fixture e não entra na medição.
+O benchmark atual usa uma fixture replay validada no repositório, com 50 perguntas técnicas em português e histórico determinístico crescente. Cada requisição é uma conversa nova reconstruída a partir dos turnos fixos; a resposta real do runtime não altera o próximo request. O cenário longo continua representando uma carga de contexto sintética separada do eixo conversacional. O warmup usa outra fixture e não entra na medição. Quando o modo `independent` é solicitado, cada amostra recebe um prompt determinístico distinto com o mesmo tamanho-alvo, e warmup e medição usam sementes disjuntas.
 
 O modelo pode encerrar antes de 128 tokens. Não forçamos ignore-EOS porque não é um parâmetro portátil entre os três servidores. Registrar saída efetiva é obrigatório: uma configuração pode parecer mais rápida apenas por gerar menos texto. Textos sintéticos também podem provocar respostas curtas ou estranhas; confirme os comprimentos no piloto antes de investir na bateria inteira.
 

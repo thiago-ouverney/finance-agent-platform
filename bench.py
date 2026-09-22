@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 from results_layout import artifact, execution_label, href, locate, prepare, runtime_root, slug
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 GUIDELLM_VERSION = "0.7.4"
 WORKLOADS = {"short": 256, "medium": 2048, "long": 8192}
 OUTPUT_TOKENS = 128
@@ -31,12 +31,14 @@ DEFAULT_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat
 DEFAULT_WARMUP_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat_warmup_v1.json"
 
 
-def _synthetic_prompt(tokenizer, target_tokens: int, seed: str | None = None) -> str:
-    """Cria texto localmente; nenhuma chamada de servidor participa do relógio."""
-    seed = seed or "Explique de forma objetiva este conceito para um estudante de estatística. "
-    text = seed
+def _synthetic_prompt(tokenizer, target_tokens: int, seed: str | int) -> str:
+    """Cria um prompt determinístico e distinto com exatamente o tamanho-alvo."""
+    digest = hashlib.sha256(str(seed).encode()).digest()
+    marker = " ".join(f"word{value % 100}" for value in digest[:8])
+    sentence = "Explique de forma objetiva este conceito para um estudante de estatística. "
+    text = f"{marker}. {sentence}"
     while len(tokenizer.encode(text, add_special_tokens=False)) < target_tokens:
-        text += seed
+        text += sentence
     ids = tokenizer.encode(text, add_special_tokens=False)[:target_tokens]
     return tokenizer.decode(ids, skip_special_tokens=False)
 
@@ -139,20 +141,23 @@ def stream_metrics(request_start_time, first_token_time, last_token_time, reques
             "output_tokens": completion, "decode_tokens_s": decode, "effective_tokens_s": effective}
 
 
-def run_stream_batch(cfg, tokenizer, scenario, count, timeout, secret="", warmup=False):
-    seed = ("Esta é uma requisição descartável de aquecimento. Explique de forma objetiva "
-            "um conceito operacional de inferência local. ") if warmup else None
-    prompt = _synthetic_prompt(tokenizer, WORKLOADS[scenario], seed)
+def run_stream_batch(cfg, tokenizer, scenario, count, timeout, secret="", seed=0):
+    samples = [
+        (f"{seed}:{index}", _synthetic_prompt(tokenizer, WORKLOADS[scenario], f"{seed}:{index}"))
+        for index in range(count)
+    ]
     successful, errored = [], []
-    for index in range(count):
+    for index, (workload_seed, prompt) in enumerate(samples):
         try:
             row = stream_request(cfg, prompt, timeout, secret)
-            row.update({"mode": "independent", "request_id": f"{scenario}-independent-{index+1}"})
+            row.update({"mode": "independent", "request_id": f"{scenario}-independent-{index+1}",
+                        "workload_seed": workload_seed})
             row["status"] = "successful"
             successful.append(row)
         except Exception as exc:
             errored.append({"status": "errored", "mode": "independent",
-                            "request_id": f"{scenario}-independent-{index+1}", "error": str(exc)})
+                            "request_id": f"{scenario}-independent-{index+1}",
+                            "workload_seed": workload_seed, "error": str(exc)})
     return {"benchmarks": [{"requests": {"successful": successful, "errored": errored, "incomplete": []}}]}
 
 
@@ -682,7 +687,7 @@ def write_requests_csv(path, report):
     """Amostras individuais para análise no R/Python, incluindo status de erro."""
     from reporting import derived
     fields = ["status", "error", "mode", "request_id", "conversation_index", "turn_index",
-              "fixture_name", "fixture_sha256",
+              "fixture_name", "fixture_sha256", "workload_seed",
               "history_tokens", "history_tokens_estimate", "target_history_tokens", "messages_count",
               "request_sha256", "request_start_time", "first_token_time", "request_end_time",
               "time_to_first_token_seconds", "generation_time_seconds", "end_to_end_latency_seconds",
@@ -757,6 +762,8 @@ def run(args):
                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
                     "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
                     "mode": args.mode, "conversation_turns": args.conversation_turns,
+                    "prompt_policy": ("deterministic unique prompt per request; warmup and measure use disjoint seeds"
+                                      if not conversation_mode else "fixed conversation fixture"),
                     "conversation_fixture": {"path": conversation_fixture["path"], "sha256": conversation_fixture["sha256"],
                                              "name": conversation_fixture["data"].get("name"),
                                              "version": conversation_fixture["data"].get("version")} if conversation_fixture else None,
@@ -814,6 +821,8 @@ def run(args):
                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
                         config["mode"] = args.mode
                         active_fixture = warmup_conversation_fixture if phase == "warmup" else conversation_fixture
+                        config["prompt_policy"] = ("deterministic unique prompt per request; exact target content tokens; "
+                                                   "block seed plus request index") if not conversation_mode else "fixed conversation fixture"
                         if conversation_mode:
                             config["conversation_turns"] = args.conversation_turns
                             config["conversation_fixture_sha256"] = active_fixture["sha256"]
@@ -826,8 +835,7 @@ def run(args):
                             report = run_conversational_batch(cfg, measurement_tokenizer, name, n, args.conversation_turns,
                                                               args.timeout, secret, active_fixture, args.mode)
                         else:
-                            report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret,
-                                                      warmup=phase == "warmup")
+                            report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret, seed)
                         raw = redact(report, secret)
                         write_json(artifact(output, f"{prefix}.json"), raw)
                         turns = turn_manifest(raw) if conversation_mode else []
@@ -841,7 +849,7 @@ def run(args):
                         summary["expected"] = expected
                         summary["missing_request_count"] = max(0, expected - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
                         manifest["blocks"].append({"prefix": prefix, "mode": args.mode, "phase": phase,
-                                                   "scenario": name, "repetition": rep+1,
+                                                   "scenario": name, "repetition": rep+1, "seed": seed,
                                                    "conversations": n if conversation_mode else None,
                                                    "conversation_turns": args.conversation_turns if conversation_mode else None,
                                                    "expected_requests": expected,

@@ -132,12 +132,12 @@ user:   Explique em duas frases a diferenca entre RAM do sistema e VRAM da GPU..
 No `independent`, cada requisição continua curta e sem histórico:
 
 ```text
-POST 1 → [user: "Explique de forma objetiva este conceito..." ] → resposta 1
-POST 2 → [user: "Explique de forma objetiva este conceito..." ] → resposta 2
-POST 3 → [user: "Explique de forma objetiva este conceito..." ] → resposta 3
+POST 1 → [user: "word17 word83 ... Explique de forma objetiva..." ] → resposta 1
+POST 2 → [user: "word42 word11 ... Explique de forma objetiva..." ] → resposta 2
+POST 3 → [user: "word08 word65 ... Explique de forma objetiva..." ] → resposta 3
 ```
 
-Mesmo que a resposta 1 fale sobre VRAM, ela não aparece no POST 2. A entrada é controlada pelo tamanho do cenário, e não pela conversa.
+Mesmo que a resposta 1 fale sobre VRAM, ela não aparece no POST 2. Cada requisição recebe um marcador determinístico próprio, preservando exatamente o tamanho-alvo do cenário. Warmup e medição usam sementes disjuntas para evitar que o conjunto medido seja apresentado integralmente durante o aquecimento.
 
 No `replay`, cada turno cresce com o histórico fixo:
 
@@ -246,7 +246,7 @@ Essa é uma **sonda de primeira resposta**, registrada em `first-request.json` e
 
 ### 4. Warmup
 
-O warmup envia requisições reais antes da medição formal, usando `WARMUP_CONVERSATION_FIXTURE`, uma fixture separada da medição. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.
+O warmup envia requisições reais antes da medição formal. Nos modos conversacionais, usa `WARMUP_CONVERSATION_FIXTURE`, uma fixture separada da medição; no modo `independent`, usa sementes distintas das requisições medidas. Elas podem aquecer compilação, buffers, alocadores, HTTP/SSE, tokenizer, prefixos e estruturas KV. Por padrão são três por cenário e repetição.
 
 Warmup não é TTFT:
 

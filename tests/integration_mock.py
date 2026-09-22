@@ -99,7 +99,7 @@ def main():
         try:
             proc = subprocess.run([sys.executable, str(ROOT / "bench.py"), "run", "--config", str(folder / "config.json"),
                                    "--local-model-path", str(folder / "mock.gguf"), "--collect-kv-metrics",
-                                   "--smoke", "--scenarios", "short", "--warmup", "1", "--results", str(folder / "results")],
+                                   "--smoke", "--scenarios", "short", "--warmup", "3", "--results", str(folder / "results")],
                                   capture_output=True, text=True, timeout=180)
             if proc.returncode:
                 print(proc.stdout)
@@ -108,7 +108,9 @@ def main():
             result = next((folder / "results").glob("**/json/summary.json"))
             rows = json.loads(result.read_text())
             summary = next(row for row in rows if row["phase"] == "measure")
-            assert next(row for row in rows if row["phase"] == "warmup")["successful_request_count"] == 1
+            warmup = next(row for row in rows if row["phase"] == "warmup")
+            assert warmup["successful_request_count"] == 3
+            assert warmup["requests_sha256"] != summary["requests_sha256"]
             assert summary["successful_request_count"] == 3, summary
             assert summary["output_completion_token_count_p50"] == 4, summary
             assert summary["request_first_token_latency_milliseconds_p50"] > 0, summary
@@ -124,15 +126,17 @@ def main():
             assert "vllm:kv_cache_usage_perc" in kv, kv
             assert "vllm:gpu_cache_usage_perc" not in kv, kv
             assert state["maximum"] == 1, state
-            assert len(state["bodies"]) == 6, len(state["bodies"])
+            assert len(state["bodies"]) == 8, len(state["bodies"])
             assert state["bodies"][0] == state["bodies"][-1]
+            measured_prompts = [body["messages"][0]["content"] for body in state["bodies"][1:-1]]
+            assert len(set(measured_prompts)) == 6, "warmup e medidas devem usar prompts distintos"
             lifecycle = json.loads((result.parent / "lifecycle.json").read_text())
             assert lifecycle["first_request"]["ttft_ms"] > 0
             assert lifecycle["warm_reference"]["ttft_ms"] > 0
             assert lifecycle["readiness"]["process_to_api_observed_s"] is None
             assert lifecycle["mode"] == "existing-server-state-unknown"
             assert json.loads((result.parent / "manifest.json").read_text())["status"] == "complete"
-            print("PASS: primeira resposta + 1 warmup + 3 medidas + referência final; concorrência máxima = 1.", flush=True)
+            print("PASS: primeira resposta + 3 warmups + 3 medidas distintas + referência final; concorrência máxima = 1.", flush=True)
             assert (csv_dir / "r1-short-measure-requests.csv").exists()
             for mode in ("failure", "missing_usage"):
                 state.update(mode=mode, bodies=[])

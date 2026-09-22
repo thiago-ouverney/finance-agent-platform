@@ -93,7 +93,7 @@ Constrói a especificação entregue ao GuideLLM:
 | `synchronous` | Espera resposta terminar antes da próxima. |
 | `warmup=0`, `cooldown=0` | Nosso laço cria blocos de warmup explícitos; evita aquecimento interno adicional. |
 | `max_requests=count`, `max_errors=1` | Limita bloco e interrompe após erro conforme política do instrumento. |
-| `synthetic_text` | Texto repetível por seed; não é dataset de avaliação semântica. |
+| `synthetic_text` | Referência de configuração do cenário; no modo `independent`, a carga medida é gerada localmente com um prompt determinístico único por requisição. |
 | `num_workers=0`, `shuffle=False` | Evita workers adicionais e reordenação do carregador. |
 | `prefer_response_metrics=True` | Prefere contagens fornecidas pela API; examine os brutos para compatibilidade. |
 | `outputs=[]` | Salvamos o relatório retornado em nosso formato/pasta. |
@@ -142,7 +142,7 @@ Gera ainda `requests_sha256` a partir de mensagens e `max_tokens`, não do alias
 
 ### `write_requests_csv(path, report)`
 
-Grava uma linha por requisição, inclusive falhas e incompletas. Para sucessos, inclui TTFT, duração, ITL, contagens, duas taxas, contexto inicial/final e faixa. Taxas de falhas não são usadas como velocidades válidas. Os JSONs brutos preservam detalhes que o CSV compacto não inclui.
+Grava uma linha por requisição, inclusive falhas e incompletas. Para sucessos, inclui TTFT, duração, ITL, contagens, duas taxas, contexto inicial/final e faixa. No modo `independent`, `workload_seed` identifica a semente efetiva do prompt. Taxas de falhas não são usadas como velocidades válidas. Os JSONs brutos preservam detalhes que o CSV compacto não inclui.
 
 ### `write_summary(output, rows)`
 
@@ -160,7 +160,7 @@ Salva resumo JSON e, havendo linhas, CSV. Chama `reporting.render` para HTML int
 8. Aguarda API por GET. Nenhum POST de inferência foi enviado por este cliente.
 9. Envia primeira requisição própria cronometrada. Ela também valida stream e usage; é medição, não aquecimento descartado.
 10. Importa GuideLLM e percorre repetições. Rotaciona ordem dos cenários para reduzir efeito fixo de posição, sem prometer eliminar tendências.
-11. Para cada cenário: roda bloco `warmup`, depois `measure`. Seeds do aquecimento recebem deslocamento de 1.000.000 para não usar exatamente a mesma carga.
+11. Para cada cenário: roda bloco `warmup`, depois `measure`. Seeds do aquecimento recebem deslocamento de 1.000.000 e o índice da requisição compõe a semente efetiva; assim warmup e medição usam conjuntos disjuntos, mantendo o mesmo tamanho-alvo.
 12. Executa GuideLLM via `asyncio.run`, salva bruto, CSV individual e resumo parcial. Verifica contagem de sucessos, erros e incompletas; discrepância interrompe a bateria com falha.
 13. Repete o prompt inicial com o observador próprio como referência aquecida. Pode aproveitar prefix caching se habilitado; não atribua toda melhora a kernels.
 14. Marca `complete` apenas se todas essas etapas passaram.

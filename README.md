@@ -307,7 +307,7 @@ BENCH_MODE=replay|closed-loop|independent
 CONVERSATION_TURNS / CONVERSATION_FIXTURE / WARMUP_CONVERSATION_FIXTURE
 ```
 
-`replay` é o padrão da bateria base: envia histórico determinístico e respostas `assistant` fixas, percorrendo os turnos da fixture em vez de repetir sempre a primeira pergunta. `closed-loop` usa o histórico, mas coloca a resposta real do runtime no turno seguinte. `independent` envia uma mensagem isolada e fica disponível apenas para comparações explicitamente solicitadas. A medição usa `CONVERSATION_FIXTURE` (`qwen_chat_bench_v2.json`, 50 turnos); o warmup usa `WARMUP_CONVERSATION_FIXTURE` (`qwen_chat_warmup_v1.json`), que é deliberadamente diferente. Ambos são JSON com `system` e `turns`; replay exige `assistant` fixo nos turnos usados.
+`replay` é o padrão da bateria base: envia histórico determinístico e respostas `assistant` fixas, percorrendo os turnos da fixture em vez de repetir sempre a primeira pergunta. `closed-loop` usa o histórico, mas coloca a resposta real do runtime no turno seguinte. `independent` envia mensagens isoladas e, quando solicitado, cria um prompt determinístico distinto por requisição, mantendo o mesmo comprimento-alvo e conjuntos disjuntos entre warmup e medição para reduzir viés de cache de prefixo. A medição conversacional usa `CONVERSATION_FIXTURE` (`qwen_chat_bench_v2.json`, 50 turnos); o warmup usa `WARMUP_CONVERSATION_FIXTURE` (`qwen_chat_warmup_v1.json`), deliberadamente diferente. Ambos são JSON com `system` e `turns`; replay exige `assistant` fixo nos turnos usados.
 
 ## Telemetria e resultados
 
@@ -398,7 +398,7 @@ Depois interrompa o servidor com `Ctrl-C`. O relatório fica em `results/profili
 
 ## Regras de validade
 
-- mesmo GGUF, tokenizer, prompt, temperatura e limite de saída nos três runtimes;
+- mesmo GGUF, tokenizer, conjunto determinístico de prompts, temperatura e limite de saída nos três runtimes;
 - uma GPU limpa e nenhum servidor concorrente;
 - nenhum download durante `bench`;
 - smoke não é comparável à bateria formal;
