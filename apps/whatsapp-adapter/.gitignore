@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 .env.local
+.env.cross-repo
 .baileys_auth/
 data/
 *.log

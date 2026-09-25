@@ -1,29 +1,16 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { handleUserMessage } from "../agent/finance-agent.js";
 import { LocalStore } from "../storage/store.js";
 import type { EnvConfig } from "../config/env.js";
+import { testEnvConfig } from "../test/test-env-config.js";
 
 function baseCfg(over: Partial<EnvConfig> = {}): EnvConfig {
-  return {
-    allowedContacts: [],
-    openaiApiKey: undefined,
-    openaiModel: "gpt-4o-mini",
-    sessionPath: "/tmp",
-    dataDir: "/tmp",
-    replyToDenied: false,
-    deniedMessage: "negado",
-    printQrInTerminal: true,
-    llmMaxOutputTokens: 1800,
-    llmMaxRequestTokens: undefined,
-    llmDailyTokenBudgetPerUser: 0,
-    llmDailyBudgetTimezone: "UTC",
-    llmTimeoutMs: 30_000,
-    llmLogJson: false,
-    ...over,
-  };
+  return testEnvConfig(over);
 }
 
 async function completeContext(store: LocalStore, contactId: string): Promise<void> {
@@ -119,6 +106,32 @@ Loja,50,00`;
     const reply = await handleUserMessage(baseCfg(), store, "faltando", "analise meus gastos");
     expect(reply).toContain("preciso que voce complete o contexto");
     expect(reply).toContain("profile.md");
+  });
+
+  it("analisa fatura com decimal em ponto sem inflar totais", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "wf-agent-"));
+    const store = new LocalStore(dir);
+    await completeContext(store, "fatura-us");
+    const fixtureCsv = readFileSync(
+      path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "../test/fixtures/invoice-en-us.csv"
+      ),
+      "utf8"
+    );
+
+    const reply = await handleUserMessage(
+      baseCfg(),
+      store,
+      "fatura-us",
+      fixtureCsv,
+      { filename: "invoice-en-us.csv" }
+    );
+
+    expect(reply).toContain("2.578,79");
+    expect(reply).not.toContain("187.310");
+    expect(reply).toContain("decimal com ponto (en-US)");
+    expect(reply).toContain("separador CSV: vírgula");
   });
 
   it("gera artefatos csv/json/md ao receber CSV com nome de arquivo", async () => {

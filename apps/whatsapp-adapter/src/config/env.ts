@@ -1,15 +1,57 @@
 import path from "node:path";
+import type { PolicySourceMode } from "../policy/types.js";
+
+/** Níveis aceitos por Pino para o logger interno do Baileys. */
+export type BaileysLogLevel =
+  | "silent"
+  | "fatal"
+  | "error"
+  | "warn"
+  | "info"
+  | "debug"
+  | "trace";
+
+const BAILEYS_LOG_LEVELS: ReadonlySet<string> = new Set([
+  "silent",
+  "fatal",
+  "error",
+  "warn",
+  "info",
+  "debug",
+  "trace",
+]);
+
+function parseBaileysLogLevel(raw: string | undefined): BaileysLogLevel {
+  const v = raw?.trim().toLowerCase() ?? "";
+  if (v === "") return "silent";
+  if (BAILEYS_LOG_LEVELS.has(v)) return v as BaileysLogLevel;
+  return "silent";
+}
 
 export type EnvConfig = {
   allowedContacts: string[];
   openaiApiKey: string | undefined;
   openaiModel: string;
+  /** Modelos que o admin pode atribuir (validação). Sempre inclui `openaiModel` ao carregar. */
+  allowedOpenaiModels: string[];
   sessionPath: string;
   dataDir: string;
+  /** `hybrid`: DB + fallback `ALLOWED_CONTACTS`. `db_only`: só identidades no SQLite. */
+  policySource: PolicySourceMode;
+  /** Caminho do SQLite de política (allowlist, modelo por ID, features, templates). */
+  policyDbPath: string;
+  /** TTL do cache de resolução de política no processo do bot (ms). */
+  policyCacheTtlMs: number;
+  /** Se definido, inicia servidor admin em `adminHost`:`adminPort` (ex.: 127.0.0.1). */
+  adminToken: string | undefined;
+  adminHost: string;
+  adminPort: number;
   replyToDenied: boolean;
   deniedMessage: string;
   /** Baileys prints QR to terminal by default */
   printQrInTerminal: boolean;
+  /** Nível Pino passado ao Baileys (`downloadMediaMessage`, socket). Default `silent`. */
+  baileysLogLevel: BaileysLogLevel;
   /** Teto de tokens de saída por chamada ao chat completions */
   llmMaxOutputTokens: number;
   /**
@@ -66,21 +108,73 @@ function parseBoolEnv(raw: string | undefined, fallback: boolean): boolean {
   return v === "true" || v === "1" || v === "yes";
 }
 
+function parsePolicySource(raw: string | undefined): PolicySourceMode {
+  const v = (raw ?? "hybrid").trim().toLowerCase();
+  if (v === "db_only" || v === "db-only") return "db_only";
+  return "hybrid";
+}
+
+function parseModelAllowlist(
+  raw: string | undefined,
+  currentModel: string
+): string[] {
+  const defaults = [
+    "gpt-4o-mini",
+    "gpt-4o",
+    "gpt-4-turbo",
+    "gpt-4",
+    "gpt-3.5-turbo",
+  ];
+  const parts = raw
+    ?.split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const base = parts && parts.length > 0 ? parts : defaults;
+  const set = new Set(base);
+  set.add(currentModel);
+  return [...set];
+}
+
 export function loadEnv(): EnvConfig {
   const allowedContacts = parseAllowedContacts(process.env.ALLOWED_CONTACTS);
 
   const sessionPath = process.env.SESSION_PATH ?? ".baileys_auth";
   const dataDir = process.env.DATA_DIR ?? "data";
+  const dataDirResolved = path.resolve(dataDir);
+
+  const openaiModel = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
+  const policyDbPath = path.resolve(
+    process.env.POLICY_DB_PATH?.trim() ||
+      path.join(dataDirResolved, "policy.sqlite")
+  );
 
   const replyRaw = process.env.REPLY_TO_DENIED?.toLowerCase();
   const replyToDenied = replyRaw === "true" || replyRaw === "1";
 
+  const adminTokenRaw = process.env.ADMIN_TOKEN?.trim();
+  const adminToken =
+    adminTokenRaw && adminTokenRaw.length > 0 ? adminTokenRaw : undefined;
+  const adminHost = (process.env.ADMIN_HOST ?? "127.0.0.1").trim() || "127.0.0.1";
+  const adminPort = parseIntEnv(process.env.ADMIN_PORT, 3847, { min: 1 });
+
   return {
     allowedContacts,
     openaiApiKey: process.env.OPENAI_API_KEY?.trim() || undefined,
-    openaiModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    openaiModel,
+    allowedOpenaiModels: parseModelAllowlist(
+      process.env.ALLOWED_OPENAI_MODELS,
+      openaiModel
+    ),
     sessionPath: path.resolve(sessionPath),
-    dataDir: path.resolve(dataDir),
+    dataDir: dataDirResolved,
+    policySource: parsePolicySource(process.env.POLICY_SOURCE),
+    policyDbPath,
+    policyCacheTtlMs: parseIntEnv(process.env.POLICY_CACHE_TTL_MS, 60_000, {
+      min: 1000,
+    }),
+    adminToken,
+    adminHost,
+    adminPort,
     replyToDenied,
     deniedMessage:
       process.env.DENIED_MESSAGE ??
@@ -88,6 +182,7 @@ export function loadEnv(): EnvConfig {
     printQrInTerminal:
       process.env.PRINT_QR_TERMINAL !== "false" &&
       process.env.PRINT_QR_TERMINAL !== "0",
+    baileysLogLevel: parseBaileysLogLevel(process.env.BAILEYS_LOG_LEVEL),
     llmMaxOutputTokens: parseIntEnv(process.env.LLM_MAX_OUTPUT_TOKENS, 1800, {
       min: 1,
     }),

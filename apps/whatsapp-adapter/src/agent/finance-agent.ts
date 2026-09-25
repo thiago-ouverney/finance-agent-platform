@@ -1,4 +1,6 @@
 import type { EnvConfig } from "../config/env.js";
+import { allFeatureKeys, type FeatureKey } from "../policy/feature-registry.js";
+import type { EffectivePolicy } from "../policy/types.js";
 import {
   estimateChatInputTokens,
   truncateChatForRequestLimit,
@@ -13,12 +15,17 @@ import {
 import type { LocalStore } from "../storage/store.js";
 import {
   categorizeRows,
+  inferMoneyLocaleFromRows,
   invoiceMonthFromFilename,
   rowsFromLooseCsv,
   sumByCategory,
   totalConsumo,
   totalNaoConsumo,
 } from "../finance/categorizer.js";
+import {
+  describeMoneyLocale,
+  parseMoneyAmount,
+} from "../finance/money-parse.js";
 import {
   applyCustomRules,
   parseCustomRulesCsv,
@@ -161,8 +168,7 @@ function parseGoalsConfig(goalsCsv: string): GoalsConfig {
   const rows = parseContextCsv(goalsCsv);
   const parseMoney = (value: string | undefined): number | undefined => {
     if (!value || isPlaceholder(value)) return undefined;
-    const n = Number.parseFloat(value.replace(/\./g, "").replace(",", "."));
-    return Number.isFinite(n) ? n : undefined;
+    return parseMoneyAmount(value, "br");
   };
   return {
     investimentoMensal: parseMoney(
@@ -213,11 +219,7 @@ export function parseBudgetArgs(text: string): {
   fixos?: number;
 } {
   const hints = parseMoneyHints(text);
-  const parseNum = (s: string) => {
-    const n = s.replace(/\./g, "").replace(",", ".");
-    const v = Number.parseFloat(n);
-    return Number.isFinite(v) ? v : undefined;
-  };
+  const parseNum = (s: string) => parseMoneyAmount(s, "br");
   const rEq = text.match(/renda\s*=\s*([\d.,]+)/i);
   const fEq = text.match(/fixos?\s*=\s*([\d.,]+)/i);
   return {
@@ -234,13 +236,8 @@ function parseMoneyHints(text: string): {
   const out: { renda?: number; fixos?: number } = {};
   const rendaM = lower.match(/renda\s*[:\s]*([\d.,]+)/);
   const fixosM = lower.match(/fixos?\s*[:\s]*([\d.,]+)/);
-  const parse = (s: string) => {
-    const n = s.replace(/\./g, "").replace(",", ".");
-    const v = Number.parseFloat(n);
-    return Number.isFinite(v) ? v : undefined;
-  };
-  if (rendaM?.[1]) out.renda = parse(rendaM[1]);
-  if (fixosM?.[1]) out.fixos = parse(fixosM[1]);
+  if (rendaM?.[1]) out.renda = parseMoneyAmount(rendaM[1], "br");
+  if (fixosM?.[1]) out.fixos = parseMoneyAmount(fixosM[1], "br");
   return out;
 }
 
@@ -259,6 +256,14 @@ function footerSuggestions(): string {
     "• Envie um CSV de fatura (colado ou arquivo .csv) ou use `/orcamento renda=12000 fixos=4701` após ter dados salvos.",
     "• `/help` lista os comandos.",
   ].join("\n");
+}
+
+export function defaultEffectivePolicy(cfg: EnvConfig): EffectivePolicy {
+  return {
+    model: cfg.openaiModel,
+    features: new Set<FeatureKey>(allFeatureKeys()),
+    identitySource: "env",
+  };
 }
 
 function defaultNoDataReply(): string {
@@ -287,7 +292,9 @@ async function dispatchCommand(
   contactId: string,
   ctxCheck: ContextCheck,
   goals: GoalsConfig,
-  customRules: CustomRule[]
+  customRules: CustomRule[],
+  effectiveModel: string,
+  llmFeatureEnabled: boolean
 ): Promise<string> {
   switch (cmd.kind) {
     case "help":
@@ -309,8 +316,10 @@ async function dispatchCommand(
       const stmts = await store.loadStatements(contactId);
       const n = stmts.invoices.length;
       const llm =
-        cfg.openaiApiKey !== undefined && cfg.openaiApiKey.length > 0
-          ? `Modelo (IA): ativo (${cfg.openaiModel})`
+        cfg.openaiApiKey !== undefined &&
+        cfg.openaiApiKey.length > 0 &&
+        llmFeatureEnabled
+          ? `Modelo (IA): ativo (${effectiveModel})`
           : "Modelo (IA): desligado — apenas análise local";
       const lines = [
         "Status",
@@ -429,6 +438,12 @@ async function buildCsvDeterministicBlock(
   await store.appendInvoiceRows(contactId, label, rawRows);
 
   const month = filename ? invoiceMonthFromFilename(filename) : undefined;
+  const moneyLocale = inferMoneyLocaleFromRows(rawRows);
+  const firstLine = trimmed.split(/\r?\n/)[0] ?? "";
+  const csvSeparator =
+    firstLine.includes(";") && !firstLine.includes(",")
+      ? "ponto e vírgula"
+      : "vírgula";
   const sums = sumByCategory(rows);
   const tc = topCategories(sums, 8);
   const tConsumo = totalConsumo(rows);
@@ -436,6 +451,7 @@ async function buildCsvDeterministicBlock(
 
   const block = [
     `[Análise CSV: ${label}${month ? ` | mês fatura: ${month}` : ""}]`,
+    `Formato de valores detectado: ${describeMoneyLocale(moneyLocale)} | separador CSV: ${csvSeparator}`,
     `Total consumo (sem pagamentos/encargos): ${formatCurrency(tConsumo)}`,
     tFin > 0 ? `Pagamentos/encargos (fora do consumo): ${formatCurrency(tFin)}` : "",
     "Top categorias:",
@@ -542,8 +558,17 @@ export async function handleUserMessage(
     sourceChatId?: string;
     sourceJid?: string;
     rawCsvFromFile?: string;
+    /** Política efetiva por ID (modelo + features). Omitido = comportamento legado (todas as features). */
+    policy?: EffectivePolicy;
+    /** Texto quando uma feature necessária está desligada (vem do DB de templates). */
+    featureDisabledReply?: string;
   }
 ): Promise<string> {
+  const effective = opts?.policy ?? defaultEffectivePolicy(cfg);
+  const featureDisabled =
+    opts?.featureDisabledReply?.trim() ||
+    "Esta funcionalidade não está liberada para o seu usuário. Fale com o administrador.";
+
   await store.ensureContactScaffold(contactId);
   const context = await store.loadContactContext(contactId);
   const contextPath = store.getContactContextPath(contactId);
@@ -555,10 +580,20 @@ export async function handleUserMessage(
 
   const cmd = parseCommandLine(trimmed);
   if (cmd) {
+    if (!effective.features.has("finance.local_commands")) {
+      await store.appendMessage(contactId, { role: "user", text: trimmed });
+      await store.appendMessage(contactId, {
+        role: "assistant",
+        text: featureDisabled,
+      });
+      return featureDisabled;
+    }
     if (cmd.kind === "limpar" && cmd.confirm) {
       await store.clearAll(contactId);
     }
     await store.appendMessage(contactId, { role: "user", text: trimmed });
+    const llmFeat =
+      Boolean(cfg.openaiApiKey) && effective.features.has("finance.llm_chat");
     const out = await dispatchCommand(
       cmd,
       cfg,
@@ -566,7 +601,9 @@ export async function handleUserMessage(
       contactId,
       ctxCheck,
       goals,
-      customRules
+      customRules,
+      effective.model,
+      llmFeat
     );
     await store.appendMessage(contactId, { role: "assistant", text: out });
     return out;
@@ -575,6 +612,17 @@ export async function handleUserMessage(
   const convBefore = await store.loadConversation(contactId);
 
   await store.appendMessage(contactId, { role: "user", text: trimmed });
+
+  if (
+    looksLikeCsv(trimmed) &&
+    !effective.features.has("finance.csv_import")
+  ) {
+    await store.appendMessage(contactId, {
+      role: "assistant",
+      text: featureDisabled,
+    });
+    return featureDisabled;
+  }
 
   let deterministicBlock = "";
   const sourceLabel = opts?.sourceJid ?? opts?.sourceChatId ?? "whatsapp";
@@ -610,7 +658,10 @@ export async function handleUserMessage(
     return reply;
   }
 
-  if (!cfg.openaiApiKey) {
+  const llmAllowed =
+    Boolean(cfg.openaiApiKey) && effective.features.has("finance.llm_chat");
+
+  if (!llmAllowed) {
     let reply: string;
     if (deterministicBlock.trim()) {
       reply = deterministicBlock.trim() + footerSuggestions();
@@ -662,7 +713,7 @@ export async function handleUserMessage(
       historyForModel,
       cfg.llmMaxRequestTokens,
       cfg.llmMaxOutputTokens,
-      cfg.openaiModel
+      effective.model
     );
     historyForModel = fit.messages;
     droppedHistoryMessages = fit.droppedHistoryMessages;
@@ -670,7 +721,7 @@ export async function handleUserMessage(
 
   const estimatedInput = estimateChatInputTokens(
     historyForModel,
-    cfg.openaiModel
+    effective.model
   );
 
   let dateKey = "";
@@ -692,7 +743,8 @@ export async function handleUserMessage(
     try {
       const { text, usage } = await completeChat(
         cfg,
-        historyForModel as ChatMessage[]
+        historyForModel as ChatMessage[],
+        { model: effective.model }
       );
       llmPart = text;
       if (cfg.llmDailyTokenBudgetPerUser > 0 && dateKey) {
@@ -707,7 +759,7 @@ export async function handleUserMessage(
           JSON.stringify({
             event: "llm_completion",
             contactId,
-            model: cfg.openaiModel,
+            model: effective.model,
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
             total_tokens: usage.total_tokens,

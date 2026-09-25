@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   categorizeDescription,
@@ -7,7 +10,16 @@ import {
   rowsFromLooseCsv,
   sumByCategory,
   totalConsumo,
+  totalNaoConsumo,
 } from "../finance/categorizer.js";
+
+const fixtureCsv = readFileSync(
+  path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../test/fixtures/invoice-en-us.csv"
+  ),
+  "utf8"
+);
 
 describe("parseBrazilianMoney", () => {
   it("interpreta formato BR", () => {
@@ -60,5 +72,20 @@ describe("invoiceMonthFromFilename", () => {
 
   it("retorna undefined para nome inválido", () => {
     expect(invoiceMonthFromFilename("dump.csv")).toBeUndefined();
+  });
+});
+
+describe("fixture sintética de fatura (decimal com ponto)", () => {
+  it("totaliza consumo e pagamento corretamente", () => {
+    const cat = categorizeRows(rowsFromLooseCsv(fixtureCsv));
+    expect(totalConsumo(cat)).toBeCloseTo(2578.79, 2);
+    expect(totalNaoConsumo(cat)).toBeCloseTo(4745.82, 2);
+  });
+
+  it("usa lançamento como descrição sem prefixar data", () => {
+    const cat = categorizeRows(rowsFromLooseCsv(fixtureCsv));
+    const superm = cat.find((r) => r.descricao.includes("SUPERM PRINCESA"));
+    expect(superm?.descricao).toBe("SUPERM PRINCESA ICARAI");
+    expect(superm?.valor).toBeCloseTo(103.46, 2);
   });
 });

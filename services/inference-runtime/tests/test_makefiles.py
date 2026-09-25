@@ -91,7 +91,7 @@ class MakefileRegressionTests(unittest.TestCase):
                     "VLLM_EXTRA_ARGS=--gpu-memory-utilization '0.7 value'",
                     "BENCH_STARTUP_TIMEOUT=17", "BENCH_SCENARIOS=short",
                     "BENCH_REQUESTS=1", "BENCH_REPETITIONS=1", "BENCH_WARMUP=1",
-                    "SWEEP_START=2048", "SWEEP_STEP=2048",
+                    "SWEEP_START=2048", "SWEEP_MEMORY_STEP_MB=256",
                     "SWEEP_MAX_CONTEXT=4096", "SWEEP_REQUESTS=1",
                     "SWEEP_REPETITIONS=1", "SWEEP_WARMUP=1",
                 ],
@@ -110,7 +110,10 @@ class MakefileRegressionTests(unittest.TestCase):
             sweep_calls = [call for call in calls if "scripts/run_kv_sweep.py" in call]
             self.assertEqual(len(sweep_calls), 1)
             self.assertEqual(sweep_calls[0][sweep_calls[0].index("--start") + 1], "2048")
-            self.assertEqual(sweep_calls[0][sweep_calls[0].index("--step") + 1], "2048")
+            self.assertEqual(
+                sweep_calls[0][sweep_calls[0].index("--memory-step-mb") + 1],
+                "256",
+            )
             self.assertEqual(sweep_calls[0][sweep_calls[0].index("--max-context") + 1], "4096")
 
 

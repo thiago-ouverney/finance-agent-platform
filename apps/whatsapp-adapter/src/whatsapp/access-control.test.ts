@@ -6,24 +6,10 @@ import {
   extractSenderDigits,
 } from "../whatsapp/access-control.js";
 import type { EnvConfig } from "../config/env.js";
+import { testEnvConfig } from "../test/test-env-config.js";
 
 function cfg(contacts: string[]): EnvConfig {
-  return {
-    allowedContacts: contacts,
-    openaiApiKey: undefined,
-    openaiModel: "gpt-4o-mini",
-    sessionPath: "/tmp",
-    dataDir: "/tmp",
-    replyToDenied: false,
-    deniedMessage: "negado",
-    printQrInTerminal: true,
-    llmMaxOutputTokens: 1800,
-    llmMaxRequestTokens: undefined,
-    llmDailyTokenBudgetPerUser: 0,
-    llmDailyBudgetTimezone: "UTC",
-    llmTimeoutMs: 30_000,
-    llmLogJson: false,
-  };
+  return testEnvConfig({ allowedContacts: contacts });
 }
 
 describe("extractSenderCandidates", () => {

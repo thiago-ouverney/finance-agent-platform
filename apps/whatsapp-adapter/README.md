@@ -1,12 +1,27 @@
 # whatsapp-finance-agent
 
-Agente conversacional de planejamento financeiro via WhatsApp usando [Baileys](https://github.com/WhiskeySockets/Baileys). Responde apenas a números configurados em `ALLOWED_CONTACTS`.
+Agente conversacional de planejamento financeiro via WhatsApp usando [Baileys](https://github.com/WhiskeySockets/Baileys). O acesso e o modelo por número são definidos em **`DATA_DIR/policy.sqlite`** (com seed a partir de `ALLOWED_CONTACTS` na primeira execução) e podem ser editados pelo **painel admin** local.
 
 Cada número autorizado ganha um contexto próprio em `DATA_DIR/contacts/<id>/`, com templates preenchíveis de perfil, regras de categorização, comunicação, ciclo de fatura e metas.
 
 ## Pré-requisitos
 
-- Node.js 20+ **ou** [Bun](https://bun.sh)
+- **Node.js 18.18+** (recomendado **20+**) para rodar o bot e os testes — o `better-sqlite3` (política em `policy.sqlite`) é um **addon nativo do Node** e [ainda não é suportado pelo Bun](https://github.com/oven-sh/bun/issues/4290); use `npm run dev` (tsx + Node), não `npm run dev:bun`.
+- Em **Node 18**, o Baileys precisa de `globalThis.crypto` (Web Crypto); o projeto carrega [`src/bootstrap-webcrypto.ts`](src/bootstrap-webcrypto.ts) no arranque e no Vitest.
+- [Bun](https://bun.sh) pode ser usado só para `bun install`, se preferir.
+- Após **trocar a versão do Node**, rode `npm install` de novo (o `postinstall` executa `npm rebuild better-sqlite3`) para evitar erro de `NODE_MODULE_VERSION`.
+
+### Se o computador ficou lento ou travou
+
+Em falhas **repetidas** de conexão (ex.: `crypto is not defined` antes do polyfill), o processo podia **reconectar em loop** e acumular recursos. Hoje há **teto de reconexões** e encerramento explícito do socket antigo em [`src/whatsapp/client.ts`](src/whatsapp/client.ts). Se ainda notar lentidão: mate o processo (`Ctrl+C` ou `kill`), corrija a causa (Node 20 LTS, `npm install` no mesmo Node) e suba de novo.
+
+### Diagnóstico rápido (sem WhatsApp)
+
+```bash
+npm run doctor
+```
+
+Valida Node, Web Crypto, `better-sqlite3` e `loadEnv()` sem abrir WebSocket. Útil para anexar saída em relatórios em vez de só o stack trace.
 
 ## Configuração
 
@@ -18,8 +33,10 @@ Cada número autorizado ganha um contexto próprio em `DATA_DIR/contacts/<id>/`,
 
 2. Edite `.env`:
 
-   - `ALLOWED_CONTACTS`: lista de números **somente dígitos** (ex.: código do país + DDD + número), separados por vírgula. O código normaliza JIDs com sufixo de device (`5511...@s.whatsapp.net`).
+   - `ALLOWED_CONTACTS`: em **`POLICY_SOURCE=hybrid`** (padrão), lista de números **somente dígitos** usada como fallback quando ainda não há linha em `policy.sqlite`. Em **`POLICY_SOURCE=db_only`**, a allowlist vem só do banco (após seed ou cadastro no admin).
    - `OPENAI_API_KEY`: opcional. **Sem chave**, o bot funciona em **modo determinístico**: analisa CSV localmente, comandos `/help`, `/orcamento`, etc. **Com chave**, o modelo enriquece a resposta; os números calculados localmente continuam aparecendo quando há CSV/orçamento.
+   - `POLICY_SOURCE`, `POLICY_DB_PATH`, `POLICY_CACHE_TTL_MS`: ver `.env.example`.
+   - `ADMIN_TOKEN` (opcional): se definido, sobe um painel em `http://ADMIN_HOST:ADMIN_PORT/` (padrão `127.0.0.1:3847`) com `Authorization: Bearer <token>` para CRUD de identidades, modelo por número, features e textos de negação.
 
 3. Instale dependências:
 
@@ -28,15 +45,15 @@ Cada número autorizado ganha um contexto próprio em `DATA_DIR/contacts/<id>/`,
    # ou: npm install
    ```
 
-4. Com **Node.js** (sem Bun), variáveis em `.env` são carregadas via pacote `dotenv` no bootstrap. Com **Bun**, o runtime também pode injetar `.env` automaticamente.
+4. Com **Node.js**, variáveis em `.env` são carregadas via pacote `dotenv` no bootstrap (`src/index.ts`). Com **Bun** como runtime, o `.env` pode ser injetado automaticamente, mas o processo principal do agente deve ser **Node**.
 
 ## Execução
 
 ```bash
-bun run dev
+npm run dev
 ```
 
-O script `dev` usa `bun --watch` para rodar TypeScript nativamente. Alternativa com Node + tsx: `npm run dev:tsx`.
+O script `dev` usa **Node + `tsx --watch`** (TypeScript sem build prévio). O comando `npm run dev:bun` existe, mas **falha** hoje por causa do `better-sqlite3` no Bun.
 
 Escaneie o QR Code no terminal na primeira conexão. A sessão fica em `.baileys_auth/` (não versionar).
 
@@ -115,12 +132,32 @@ Se o WhatsApp entregar apenas um identificador `@lid` sem `senderPn`, o número 
 
 | Script              | Descrição                                           |
 | ------------------- | --------------------------------------------------- |
-| `bun run dev`       | Dev com reload (`bun --watch`)                     |
-| `npm run dev:tsx`   | Alternativa com `tsx` (Node.js sem erro Bun/tsx)   |
+| `npm run dev`       | Dev com reload (**Node + tsx**; necessário para `better-sqlite3`) |
+| `npm run dev:tsx`   | Igual ao `dev` (alias) |
+| `npm run dev:bun`   | Bun + watch (não use: SQLite nativo ainda não suportado no Bun) |
 | `bun run build` | Compila TS |
 | `bun run start` | Roda `dist/index.js` |
 | `bun run test` | Testes Vitest |
 | `bun run lint` | ESLint |
+| `npm run check:native` | Smoke test do `better-sqlite3` (falha cedo se ABI do Node não bater) |
+| `npm run doctor` | Diagnóstico: Node + Web Crypto + SQLite nativo + `loadEnv()` (sem Baileys) |
+| `npm run verify` | `lint` + `build` + `test` (o `npm test` já roda `check:native` antes do Vitest) |
+
+O `vitest` usa `src/vitest.setup.ts` para **não depender do seu `.env`** (chave OpenAI, allowlist, tetos de LLM, etc.); os testes usam `testEnvConfig()` com valores fixos.
+
+### Erro `NODE_MODULE_VERSION` / `better_sqlite3.node`
+
+O `better-sqlite3` é **nativo**: o binário em `node_modules` tem de ser compilado para **a mesma versão do Node** com que você roda `npm test`.
+
+Checklist:
+
+1. Confira com `node -v`.
+2. **Não copie** a pasta `node_modules` entre computadores ou entre versões diferentes do Node.
+3. Após `nvm use`, upgrade do Node ou pull que mudou dependências: `rm -rf node_modules && npm install` (o `postinstall` roda `npm rebuild better-sqlite3`).
+4. Rode `npm run check:native` — se falhar, siga a mensagem na tela.
+5. Em Linux, se o rebuild compilar do zero, instale toolchain típica (`build-essential`, `python3`).
+
+No CI (GitHub Actions), cada job faz `npm ci` e `npm run verify` em Node 18 e 20.
 
 ## Skills do Cursor
 

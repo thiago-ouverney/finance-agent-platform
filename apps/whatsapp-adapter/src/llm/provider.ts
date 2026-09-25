@@ -22,11 +22,14 @@ function emptyUsage(): CompletionUsage {
 
 export async function completeChat(
   cfg: EnvConfig,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  opts?: { model?: string }
 ): Promise<CompleteChatResult> {
   if (!cfg.openaiApiKey) {
     throw new Error("completeChat exige OPENAI_API_KEY");
   }
+
+  const model = opts?.model?.trim() || cfg.openaiModel;
 
   const client = new OpenAI({ apiKey: cfg.openaiApiKey });
   const timeoutMs = cfg.llmTimeoutMs;
@@ -37,7 +40,7 @@ export async function completeChat(
 
   const res = await client.chat.completions.create(
     {
-      model: cfg.openaiModel,
+      model,
       messages,
       temperature: 0.4,
       max_tokens: cfg.llmMaxOutputTokens,

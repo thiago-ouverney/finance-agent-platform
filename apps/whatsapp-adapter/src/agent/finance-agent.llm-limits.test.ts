@@ -16,25 +16,10 @@ import {
   calendarDateKeyInTimeZone,
   loadDailyUsage,
 } from "../llm/usage-store.js";
+import { testEnvConfig } from "../test/test-env-config.js";
 
 function baseCfg(over: Partial<EnvConfig> = {}): EnvConfig {
-  return {
-    allowedContacts: [],
-    openaiApiKey: "sk-test",
-    openaiModel: "gpt-4o-mini",
-    sessionPath: "/tmp",
-    dataDir: "/tmp",
-    replyToDenied: false,
-    deniedMessage: "negado",
-    printQrInTerminal: true,
-    llmMaxOutputTokens: 1800,
-    llmMaxRequestTokens: undefined,
-    llmDailyTokenBudgetPerUser: 0,
-    llmDailyBudgetTimezone: "UTC",
-    llmTimeoutMs: 30_000,
-    llmLogJson: false,
-    ...over,
-  };
+  return testEnvConfig({ openaiApiKey: "sk-test", ...over });
 }
 
 async function completeContext(store: LocalStore, contactId: string): Promise<void> {

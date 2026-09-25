@@ -2,6 +2,14 @@
  * Categorização determinística inspirada no fluxo de análise de cartão/fatura.
  */
 
+import {
+  inferMoneyLocale,
+  parseMoneyAmount,
+  type MoneyLocale,
+} from "./money-parse.js";
+
+export { parseBrazilianMoney } from "./money-parse.js";
+
 export type ExpenseCategory =
   | "Mercado"
   | "Assinatura"
@@ -28,6 +36,7 @@ export type CategorizedRow = {
 
 const PAYMENT_FATURA_PATTERNS: RegExp[] = [
   /pagamento\s+(de\s+)?fatura/i,
+  /pagamento\s+efetuado/i,
   /pagamento\s+cart[aã]o/i,
   /pix\s+.*fatura/i,
   /^pagamento\s+banco/i,
@@ -62,12 +71,46 @@ const LAZER_PATTERNS: RegExp[] = [/cinema|ingresso|show|viagem|hotel|booking|air
 
 const TRANSPORTE_GERAL_PATTERNS: RegExp[] = [/\bmetro\b|estacionamento|ped[aá]gio|passagem/i];
 
-export function parseBrazilianMoney(raw: string): number | undefined {
-  const s = raw.trim().replace(/\s/g, "");
-  if (!s) return undefined;
-  const normalized = s.replace(/\./g, "").replace(",", ".");
-  const n = Number.parseFloat(normalized);
-  return Number.isFinite(n) ? n : undefined;
+function normalizeHeaderKey(h: string): string {
+  return h
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+}
+
+const DESC_HEADER_KEYS = new Set([
+  "descricao",
+  "memo",
+  "historico",
+  "establishment",
+  "estabelecimento",
+  "lancamento",
+]);
+
+const VALOR_HEADER_KEYS = new Set(["valor", "amount", "value"]);
+
+export function extractValorSamples(
+  rows: Array<Record<string, string>>
+): string[] {
+  const samples: string[] = [];
+  for (const r of rows) {
+    const keys = Object.keys(r);
+    let valorRaw = r.valor ?? r.amount ?? r.value ?? "";
+    if (!valorRaw) {
+      const vk = keys.find((k) => k.toLowerCase().includes("valor"));
+      if (vk) valorRaw = r[vk] ?? "";
+    }
+    const s = String(valorRaw).trim();
+    if (s) samples.push(s);
+  }
+  return samples;
+}
+
+export function inferMoneyLocaleFromRows(
+  rows: Array<Record<string, string>>
+): MoneyLocale {
+  return inferMoneyLocale(extractValorSamples(rows));
 }
 
 export function categorizeDescription(desc: string): {
@@ -138,15 +181,10 @@ export function rowsFromLooseCsv(text: string): Array<Record<string, string>> {
   const delimiter =
     lines[0].includes(";") && !lines[0].includes(",") ? ";" : ",";
   const header = lines[0].split(delimiter).map((h) => h.trim().toLowerCase());
+  const headerNorm = header.map(normalizeHeaderKey);
 
-  const valorIdx = header.findIndex((h) =>
-    ["valor", "amount", "value"].includes(h)
-  );
-  const descIdx = header.findIndex((h) =>
-    ["descricao", "descrição", "memo", "historico", "histórico", "establishment"].includes(
-      h
-    )
-  );
+  const valorIdx = headerNorm.findIndex((h) => VALOR_HEADER_KEYS.has(h));
+  const descIdx = headerNorm.findIndex((h) => DESC_HEADER_KEYS.has(h));
 
   const rows: Array<Record<string, string>> = [];
 
@@ -157,12 +195,20 @@ export function rowsFromLooseCsv(text: string): Array<Record<string, string>> {
       header.forEach((key, j) => {
         row[key] = cols[j]?.trim() ?? "";
       });
+      const desc = cols[descIdx]?.trim() ?? "";
+      if (desc) row.descricao = desc;
       rows.push(row);
     }
     return rows;
   }
 
-  for (const line of lines) {
+  const startIdx =
+    headerNorm.some((h) => VALOR_HEADER_KEYS.has(h) || DESC_HEADER_KEYS.has(h))
+      ? 1
+      : 0;
+
+  for (let li = startIdx; li < lines.length; li++) {
+    const line = lines[li]!;
     const cols = splitCsvLine(line, delimiter);
     if (cols.length < 2) continue;
     const valorStr = cols[cols.length - 1];
@@ -194,11 +240,14 @@ function splitCsvLine(line: string, delimiter: string): string[] {
 }
 
 export function categorizeRows(rows: Array<Record<string, string>>): CategorizedRow[] {
+  const locale = inferMoneyLocaleFromRows(rows);
   const out: CategorizedRow[] = [];
   for (const r of rows) {
     const descRaw =
       r.descricao ??
       r.descrição ??
+      r.lançamento ??
+      r.lancamento ??
       r.memo ??
       r.establishment ??
       r.estabelecimento ??
@@ -212,10 +261,10 @@ export function categorizeRows(rows: Array<Record<string, string>>): Categorized
     }
 
     const desc = String(descRaw).trim();
-    let valor = parseBrazilianMoney(String(valorRaw));
+    let valor = parseMoneyAmount(String(valorRaw), locale);
     if (valor === undefined) {
       const nums = String(valorRaw).match(/-?[\d.,]+/);
-      if (nums) valor = parseBrazilianMoney(nums[0]);
+      if (nums) valor = parseMoneyAmount(nums[0], locale);
     }
     if (valor === undefined || desc.length === 0) continue;
 

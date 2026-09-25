@@ -7,14 +7,19 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "bun --watch src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "dev:tsx": "tsx watch src/index.ts",
+    "dev:bun": "bun --watch src/index.ts",
     "lint": "eslint src",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "npm run check:native && vitest run",
+    "test:watch": "npm run check:native && vitest",
+    "check:native": "tsx src/scripts/check-sqlite-native.ts",
+    "doctor": "tsx src/scripts/doctor.ts",
+    "verify": "npm run lint && npm run build && npm run test",
+    "postinstall": "npm rebuild better-sqlite3"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.0"
   },
   "keywords": [
     "whatsapp",
@@ -25,6 +30,7 @@
   "license": "MIT",
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.21",
+    "better-sqlite3": "^11.8.1",
     "dotenv": "^16.4.7",
     "gpt-tokenizer": "^3.4.0",
     "openai": "^4.77.0",
@@ -33,6 +39,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.5",
     "@types/qrcode-terminal": "^0.12.2",
     "eslint": "^9.17.0",
