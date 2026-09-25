@@ -111,12 +111,12 @@ SWEEP_CONVERSATION_FIXTURE ?= $(CONVERSATION_FIXTURE)
 POD_SSH ?=
 POD_PORT ?= 22
 POD_SSH_KEY ?= $(HOME)/.ssh/id_ed25519
-REMOTE_BENCH_DIR ?= /workspace/llm_local_inference_masters
+REMOTE_BENCH_DIR ?= /workspace/finance-agent-platform/services/inference-runtime
 REMOTE_RESULTS_DIR ?= $(REMOTE_BENCH_DIR)/results
 LOCAL_RESULTS_DIR ?= results-from-pod
 
 QUANTIZE_BIN := $(LLAMA_CPP_BUILD_DIR)/bin/llama-quantize
-QUANTIZE_SCRIPT := scripts/quantize_hf_to_gguf_q8_0.sh
+QUANTIZE_SCRIPT := ../../pipelines/qwen-quantization/scripts/quantize_hf_to_gguf_q8_0.sh
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
@@ -576,7 +576,7 @@ check-profilers:
 
 
 docs:
-	$(PYTHON) scripts/build_docs.py
+	@printf 'Documentação Markdown disponível em docs/README.md\n'
 
 clean-info:
 	@printf 'Não há limpeza automática: pesos, GGUFs e resultados são evidências experimentais.\n'

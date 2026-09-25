@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { CompletionUsage } from "openai/resources/completions";
-import type { EnvConfig } from "../config/env.js";
+import { hasLlmEndpoint, type EnvConfig } from "../config/env.js";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -25,13 +25,18 @@ export async function completeChat(
   messages: ChatMessage[],
   opts?: { model?: string }
 ): Promise<CompleteChatResult> {
-  if (!cfg.openaiApiKey) {
-    throw new Error("completeChat exige OPENAI_API_KEY");
+  if (!hasLlmEndpoint(cfg)) {
+    throw new Error(
+      "completeChat exige um endpoint local ou INFERENCE_API_TOKEN/OPENAI_API_KEY"
+    );
   }
 
   const model = opts?.model?.trim() || cfg.openaiModel;
 
-  const client = new OpenAI({ apiKey: cfg.openaiApiKey });
+  const client = new OpenAI({
+    apiKey: cfg.openaiApiKey || "local-openai-compatible",
+    baseURL: cfg.openaiBaseUrl,
+  });
   const timeoutMs = cfg.llmTimeoutMs;
   const signal =
     typeof AbortSignal !== "undefined" && "timeout" in AbortSignal

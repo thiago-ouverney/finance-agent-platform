@@ -4,7 +4,8 @@
 
 1. `pipelines/qwen-quantization` prepara e avalia os artefatos do Qwen.
 2. `services/inference-runtime` executa e compara Ollama, llama.cpp e vLLM com protocolo compatível com OpenAI.
-3. `apps/whatsapp-adapter` recebe mensagens pelo Baileys e consulta o endpoint local de inferência.
+3. `analytics` consolida resultados, gera tags BMC e treina modelos preditivos.
+4. `apps/whatsapp-adapter` recebe mensagens pelo Baileys e consulta o endpoint local de inferência.
 
 ```text
 Qwen / Hugging Face
@@ -14,6 +15,8 @@ pipelines/qwen-quantization
         |
         v
 services/inference-runtime
+        |
+        +------> analytics
         |
         v
 apps/whatsapp-adapter
@@ -28,6 +31,7 @@ WhatsApp
 - O prompt e o histórico conversacional pertencem ao adaptador WhatsApp.
 - O runtime expõe inferência; ele não deve conhecer contatos ou regras financeiras.
 - O pipeline produz artefatos versionáveis externamente, preferencialmente identificados por revisão imutável.
+- Analytics consome artefatos do benchmark; não implementa uma segunda medição de TTFT ou KV-cache.
 
 ## Origem dos componentes
 

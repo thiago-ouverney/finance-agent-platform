@@ -10,6 +10,7 @@ function baseCfg(over: Partial<EnvConfig> = {}): EnvConfig {
   return {
     allowedContacts: ["5511999999999"],
     openaiApiKey: undefined,
+    openaiBaseUrl: undefined,
     openaiModel: "gpt-4o-mini",
     allowedOpenaiModels: ["gpt-4o-mini"],
     sessionPath: "/tmp",

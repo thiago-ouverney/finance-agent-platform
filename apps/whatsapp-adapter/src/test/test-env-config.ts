@@ -6,6 +6,7 @@ export function testEnvConfig(over: Partial<EnvConfig> = {}): EnvConfig {
   return {
     allowedContacts: [],
     openaiApiKey: undefined,
+    openaiBaseUrl: undefined,
     openaiModel,
     allowedOpenaiModels: over.allowedOpenaiModels ?? [
       "gpt-4o-mini",

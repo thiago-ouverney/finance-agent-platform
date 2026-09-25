@@ -4,7 +4,7 @@ Benchmark acadêmico de inferência local para comparar **vLLM, llama.cpp e Olla
 
 O fluxo oficial é baseado no `Makefile`. O benchmark não baixa modelos, não troca artefatos automaticamente e não faz fallback quando um runtime falha. Download, criação de diretórios e instalação são preparação; não entram nos tempos medidos.
 
-Documentação detalhada: [índice de documentação](docs/README.md) · [bench explicado](docs/benchmark/bench-explicado.html) · [fluxo completo do Make](docs/make/make-fluxo.md) · [metodologia](docs/benchmark/metodologia.html) · [código explicado](docs/engenharia/codigo-explicado.html) · [resultados reais do Pod de 22/09/2026](docs/benchmark/resultados-pod-20260922.md).
+Documentação detalhada: [índice de documentação](docs/README.md) · [bench explicado](docs/benchmark/bench-explicado.md) · [fluxo completo do Make](docs/make/make-fluxo.md) · [metodologia](docs/benchmark/metodologia.md) · [código explicado](docs/engenharia/codigo-explicado.md). Resultados e diagnósticos datados ficam no arquivo histórico do monorepo.
 
 ## Preparar um pod novo
 
@@ -18,8 +18,8 @@ git --version
 python3 --version
 mkdir -p /workspace
 cd /workspace
-git clone https://github.com/yanwerneck/llm_local_inference_masters.git
-cd /workspace/llm_local_inference_masters
+git clone https://github.com/thiago-ouverney/finance-agent-platform.git
+cd /workspace/finance-agent-platform/services/inference-runtime
 ```
 
 O repositório é público, portanto HTTPS é o caminho mais simples para clonar no Pod e não exige chave SSH. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `./.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
@@ -42,8 +42,8 @@ ssh -T git@github.com
 Se o repositório já foi clonado por HTTPS e você quer fazer push por SSH:
 
 ```bash
-cd /workspace/llm_local_inference_masters
-git remote set-url origin git@github.com:yanwerneck/llm_local_inference_masters.git
+cd /workspace/finance-agent-platform
+git remote set-url origin git@github.com:thiago-ouverney/finance-agent-platform.git
 ```
 
 Não copie a chave privada do seu computador pessoal para um Pod descartável. Ao terminar, remova a chave do Pod ou revogue-a no GitHub.
@@ -51,8 +51,8 @@ Não copie a chave privada do seu computador pessoal para um Pod descartável. A
 ## Fluxo mínimo no RunPod
 
 ```bash
-git clone https://github.com/yanwerneck/llm_local_inference_masters.git
-cd llm_local_inference_masters
+git clone https://github.com/thiago-ouverney/finance-agent-platform.git
+cd finance-agent-platform/services/inference-runtime
 make prepare-all MODEL_SIZE=7B
 make bench-all MODEL_SIZE=7B
 ```
@@ -224,7 +224,7 @@ make smoke-all MODEL_SIZE=7B
 
 Os três smokes usam poucas requisições e somente `short`; servem para diagnosticar instalação, porta, tokenizer, readiness, telemetria e carregamento. Não são resultados finais nem substituem `bench-all`.
 
-Com o ambiente e os pesos já preparados no SSD, acrescente `PREPARE_OFFLINE=1` para evitar instalações/downloads repetidos e `BENCH_STARTUP_TIMEOUT=300` para limitar a espera de startup. Os Makefiles exigem GNU Make com `.ONESHELL` (3.82+); o Make 3.81 padrão do macOS é recusado. Consulte o [diagnóstico no RunPod](docs/make/diagnostico-makefiles.md) para causas, comandos e cobertura dos testes.
+Com o ambiente e os pesos já preparados no SSD, acrescente `PREPARE_OFFLINE=1` para evitar instalações/downloads repetidos e `BENCH_STARTUP_TIMEOUT=300` para limitar a espera de startup. Os Makefiles exigem GNU Make com `.ONESHELL` (3.82+); o Make 3.81 padrão do macOS é recusado. Consulte o [diagnóstico histórico no RunPod](../../docs/archive/inference-runtime/diagnostico-makefiles.md) para causas, comandos e cobertura dos testes daquela execução.
 
 ### Sweep rápido de integração
 
@@ -244,7 +244,7 @@ A integração foi validada ao vivo em 22/09/2026 no RunPod, com o mesmo GGUF 7B
 [BENCH ALL] status: vLLM=0 llama.cpp=0 Ollama=0
 ```
 
-Os três smokes, os três quick sweeps de 1024 tokens, as preparações offline e a bateria agregada reduzida passaram. O relatório completo, com métricas, comandos e caminhos dos artefatos, está em [docs/benchmark/resultados-pod-20260922.md](docs/benchmark/resultados-pod-20260922.md).
+Os três smokes, os três quick sweeps de 1024 tokens, as preparações offline e a bateria agregada reduzida passaram. O relatório datado dessa rodada foi preservado em `docs/archive/inference-runtime/` na raiz do monorepo.
 
 O vLLM precisou da configuração diagnóstica `--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80`; o startup levou aproximadamente 96 segundos. O `EngineDeadError` registrado no encerramento do sweep ocorreu depois de respostas HTTP 200 e do SIGTERM intencional de shutdown; o alvo terminou com código zero. Isso não foi classificado como OOM ou falha de inferência.
 
@@ -340,7 +340,7 @@ Com uma porta SSH diferente:
 
 ```bash
 make pull-results POD_SSH=root@HOST_DO_POD POD_PORT=2222 \
-  REMOTE_RESULTS_DIR=/workspace/llm_local_inference_masters/results \
+  REMOTE_RESULTS_DIR=/workspace/finance-agent-platform/services/inference-runtime/results \
   LOCAL_RESULTS_DIR=results-pod
 ```
 
@@ -360,10 +360,10 @@ Na máquina local, entre em `~/Documents` e use o código exibido:
 cd ~/Documents
 runpodctl receive CODIGO_EXIBIDO
 tar -xzf llm-local-inference-results.tar.gz \
-  -C llm_local_inference_masters-results --strip-components=1
+  -C inference-runtime-results --strip-components=1
 ```
 
-O `runpodctl send/receive` funciona por código de transferência e não depende de uma sessão SCP tradicional. Consulte o [relatório da rodada](docs/benchmark/resultados-pod-20260922.md) para o pacote já transferido desta execução.
+O `runpodctl send/receive` funciona por código de transferência e não depende de uma sessão SCP tradicional. Relatórios de rodadas anteriores ficam em `docs/archive/inference-runtime/` na raiz do monorepo.
 
 ### Profiling para memory-bound/compute-bound
 

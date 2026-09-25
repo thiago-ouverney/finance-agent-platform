@@ -48,7 +48,7 @@ Sem `--launch`, o servidor já existia antes do cronômetro: medimos a primeira 
 
 O protocolo é comum aos três servidores, mas o comando muda: `vllm serve` para vLLM; `llama-server -m caminho/model.gguf` para llama.cpp; e `ollama serve`/preload local mantido em foreground para Ollama. No Ollama, a API pode estar viva antes do modelo ser carregado; por isso não usamos processo → API como substituto do processo → primeiro conteúdo. Cada runtime deve usar o mesmo artefato local e um arquivo `--launch` separado. Downloads antes do processo ficam fora; download iniciado pelo servidor torna a execução inválida para comparação.
 
-Existe documentação histórica separada sobre tentativas com Qwen2.5-14B em [diagnostico-qwen14b-vllm.md](../diagnosticos/diagnostico-qwen14b-vllm.md) e [relatorio-falhas.md](../diagnosticos/relatorio-falhas.md). Esses diagnósticos não fazem parte da rodada formal atual, não devem ser misturados aos resultados 7B e não alteram o modelo padrão deste protocolo.
+Documentação histórica sobre tentativas anteriores foi movida para `docs/archive/inference-runtime/` na raiz do monorepo. Esses diagnósticos não fazem parte da rodada formal atual e não devem ser misturados aos resultados do protocolo vigente.
 
 1. Validamos configuração, versão do instrumento e arquivos do tokenizer, antes de iniciar o runtime.
 2. Com `--launch`, lançamos o processo e medimos até a API listar o modelo. Sem essa opção, a partida anterior é desconhecida e não recebe um tempo inventado.

@@ -6,9 +6,7 @@ Cada número autorizado ganha um contexto próprio em `DATA_DIR/contacts/<id>/`,
 
 ## Pré-requisitos
 
-- **Node.js 18.18+** (recomendado **20+**) para rodar o bot e os testes — o `better-sqlite3` (política em `policy.sqlite`) é um **addon nativo do Node** e [ainda não é suportado pelo Bun](https://github.com/oven-sh/bun/issues/4290); use `npm run dev` (tsx + Node), não `npm run dev:bun`.
-- Em **Node 18**, o Baileys precisa de `globalThis.crypto` (Web Crypto); o projeto carrega [`src/bootstrap-webcrypto.ts`](src/bootstrap-webcrypto.ts) no arranque e no Vitest.
-- [Bun](https://bun.sh) pode ser usado só para `bun install`, se preferir.
+- **Node.js 20.19+** para rodar o bot e os testes. O `better-sqlite3` é um addon nativo; use sempre a mesma versão do Node ao instalar e executar.
 - Após **trocar a versão do Node**, rode `npm install` de novo (o `postinstall` executa `npm rebuild better-sqlite3`) para evitar erro de `NODE_MODULE_VERSION`.
 
 ### Se o computador ficou lento ou travou
@@ -34,18 +32,19 @@ Valida Node, Web Crypto, `better-sqlite3` e `loadEnv()` sem abrir WebSocket. Út
 2. Edite `.env`:
 
    - `ALLOWED_CONTACTS`: em **`POLICY_SOURCE=hybrid`** (padrão), lista de números **somente dígitos** usada como fallback quando ainda não há linha em `policy.sqlite`. Em **`POLICY_SOURCE=db_only`**, a allowlist vem só do banco (após seed ou cadastro no admin).
-   - `OPENAI_API_KEY`: opcional. **Sem chave**, o bot funciona em **modo determinístico**: analisa CSV localmente, comandos `/help`, `/orcamento`, etc. **Com chave**, o modelo enriquece a resposta; os números calculados localmente continuam aparecendo quando há CSV/orçamento.
+   - `WHATSAPP_INFERENCE_BASE_URL`: endpoint `/v1` OpenAI-compatible do Ollama, vLLM ou llama.cpp. Com endpoint local, `INFERENCE_API_TOKEN` pode ficar vazio; sem endpoint e sem chave, o bot funciona em modo determinístico.
+   - `WHATSAPP_INFERENCE_MODEL`: alias servido pelo runtime, por exemplo `qwen-whatsapp`.
+   - `INFERENCE_API_TOKEN`: token opcional do endpoint. `OPENAI_BASE_URL`, `OPENAI_API_KEY` e `OPENAI_MODEL` continuam aceitos como compatibilidade.
    - `POLICY_SOURCE`, `POLICY_DB_PATH`, `POLICY_CACHE_TTL_MS`: ver `.env.example`.
    - `ADMIN_TOKEN` (opcional): se definido, sobe um painel em `http://ADMIN_HOST:ADMIN_PORT/` (padrão `127.0.0.1:3847`) com `Authorization: Bearer <token>` para CRUD de identidades, modelo por número, features e textos de negação.
 
 3. Instale dependências:
 
    ```bash
-   bun install
-   # ou: npm install
+   npm install
    ```
 
-4. Com **Node.js**, variáveis em `.env` são carregadas via pacote `dotenv` no bootstrap (`src/index.ts`). Com **Bun** como runtime, o `.env` pode ser injetado automaticamente, mas o processo principal do agente deve ser **Node**.
+4. As variáveis em `.env` são carregadas via pacote `dotenv` no bootstrap (`src/index.ts`).
 
 ## Execução
 
@@ -53,13 +52,13 @@ Valida Node, Web Crypto, `better-sqlite3` e `loadEnv()` sem abrir WebSocket. Út
 npm run dev
 ```
 
-O script `dev` usa **Node + `tsx --watch`** (TypeScript sem build prévio). O comando `npm run dev:bun` existe, mas **falha** hoje por causa do `better-sqlite3` no Bun.
+O script `dev` usa **Node + `tsx --watch`** (TypeScript sem build prévio).
 
 Escaneie o QR Code no terminal na primeira conexão. A sessão fica em `.baileys_auth/` (não versionar).
 
 ## Uso
 
-### Modo sem IA (`OPENAI_API_KEY` vazio)
+### Modo sem IA (endpoint e chave vazios)
 
 - Cole ou envie **CSV** com colunas de descrição e valor (ex.: `descricao,valor`).
 - Use os **comandos** abaixo (sempre começam com `/`).
@@ -67,7 +66,7 @@ Escaneie o QR Code no terminal na primeira conexão. A sessão fica em `.baileys
 
 ### Com IA
 
-- Mensagens livres passam pelo modelo configurado (`OPENAI_MODEL`, padrão `gpt-4o-mini`).
+- Mensagens livres passam pelo modelo configurado (`WHATSAPP_INFERENCE_MODEL`).
 - Quando houver análise local (CSV/orçamento), o texto inclui primeiro o bloco numérico e depois a parte do modelo.
 - O contexto do contato (templates) é injetado no prompt para personalizar regras, metas e estilo de comunicação.
 
@@ -134,11 +133,10 @@ Se o WhatsApp entregar apenas um identificador `@lid` sem `senderPn`, o número 
 | ------------------- | --------------------------------------------------- |
 | `npm run dev`       | Dev com reload (**Node + tsx**; necessário para `better-sqlite3`) |
 | `npm run dev:tsx`   | Igual ao `dev` (alias) |
-| `npm run dev:bun`   | Bun + watch (não use: SQLite nativo ainda não suportado no Bun) |
-| `bun run build` | Compila TS |
-| `bun run start` | Roda `dist/index.js` |
-| `bun run test` | Testes Vitest |
-| `bun run lint` | ESLint |
+| `npm run build` | Compila TS |
+| `npm run start` | Roda `dist/index.js` |
+| `npm run test` | Testes Vitest |
+| `npm run lint` | ESLint |
 | `npm run check:native` | Smoke test do `better-sqlite3` (falha cedo se ABI do Node não bater) |
 | `npm run doctor` | Diagnóstico: Node + Web Crypto + SQLite nativo + `loadEnv()` (sem Baileys) |
 | `npm run verify` | `lint` + `build` + `test` (o `npm test` já roda `check:native` antes do Vitest) |
@@ -158,10 +156,6 @@ Checklist:
 5. Em Linux, se o rebuild compilar do zero, instale toolchain típica (`build-essential`, `python3`).
 
 No CI (GitHub Actions), cada job faz `npm ci` e `npm run verify` em Node 18 e 20.
-
-## Skills do Cursor
-
-Em [`.cursor/skills/`](.cursor/skills/) há orientações para evolução do projeto (`financial-planner-whatsapp`, `baileys-whatsapp-agent`).
 
 ## Aviso
 

@@ -1,0 +1,8 @@
+.venv/
+data/*.csv
+data/*.parquet
+models/*
+!data/.gitkeep
+!models/.gitkeep
+.ipynb_checkpoints/
+__pycache__/

@@ -169,7 +169,7 @@ O profiling automatizado fica em `Makefile.profiling`, separado da bateria ofici
 
 ## 10. Estado atual da validação no Pod
 
-A integração foi validada ao vivo em 22/09/2026 no RunPod com uma RTX 3090 e o GGUF 7B. Preparação offline, três smokes, três quick sweeps e `bench-all` reduzido passaram; o agregado terminou com `vLLM=0 llama.cpp=0 Ollama=0`. As métricas e os caminhos dos artefatos estão em [resultados-pod-20260922.md](../benchmark/resultados-pod-20260922.md).
+A integração foi validada ao vivo em 22/09/2026 no RunPod com uma RTX 3090 e o GGUF 7B. Preparação offline, três smokes, três quick sweeps e `bench-all` reduzido passaram; o agregado terminou com `vLLM=0 llama.cpp=0 Ollama=0`. O relatório dessa rodada está preservado em `docs/archive/inference-runtime/` na raiz do monorepo.
 
 O vLLM foi executado com `--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80`. O `EngineDeadError` visto no encerramento do sweep ocorre após respostas HTTP 200 e o SIGTERM intencional do harness; não foi OOM e o alvo retornou zero.
 

@@ -1,6 +1,6 @@
 # O benchmark por dentro: guia detalhado do código
 
-Este documento explica a versão 0.4 para quem conhece estatística, mas não necessariamente programação de servidores ou GPUs. Leia junto com [os fontes numerados linha a linha](codigo-fontes.md) e com o [bench explicado](../benchmark/bench-explicado.md). As explicações abaixo seguem funções e blocos lógicos; o apêndice contém **cada linha dos módulos centrais**, sem ocultar implementações. Não é uma promessa de explicar uma operação de GPU que o cliente não observa.
+Este documento explica a versão 0.4 para quem conhece estatística, mas não necessariamente programação de servidores ou GPUs. Leia junto com o [bench explicado](../benchmark/bench-explicado.md) e com os módulos Python do runtime. As explicações seguem funções e blocos lógicos; não são uma promessa de explicar uma operação de GPU que o cliente não observa.
 
 ## 1. Primeiro: o que este programa é — e o que não é
 
@@ -321,6 +321,6 @@ O código não mede qualidade semântica, energia total, FLOPs, banda física, t
 - [GuideLLM 0.7.4: métricas por requisição](https://github.com/vllm-project/guidellm/blob/v0.7.4/src/guidellm/schemas/request_stats.py).
 - [vLLM: métricas de KV e serving](https://docs.vllm.ai/en/v0.12.0/design/metrics/).
 - [Metodologia do experimento](../benchmark/metodologia.md).
-- [Código completo numerado linha a linha](codigo-fontes.md), gerado por `python scripts/build_code_reference.py` (inclui `guidellm_compat.py`).
+- Código-fonte versionado do runtime, incluindo `bench.py`, `lifecycle.py`, `reporting.py` e `guidellm_compat.py`.
 
 O apêndice usa números reais e hashes dos fontes. Regenere após editar código para manter referências consistentes. Ele não substitui os arquivos executáveis: números à esquerda são para leitura, não para copiar e executar.

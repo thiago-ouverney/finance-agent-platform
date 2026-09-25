@@ -55,15 +55,15 @@ OR
 docker run --rm --gpus all -e HF_TOKEN=<hf_token> -v <path-to-model>:/usr/llm -v <host-path-to-logs>:/app/data --entrypoint python3 viannaarthur/quantize-qwen2.5 benchmark.py /usr/llm/Qwen2.5-0.5B-Instruct-GPTQ-4bit mmlu_redux
 ```
 
-## Step 4 - Performance Evaluation
-Run a performance evaluation that consists of token metrics, such as time to first token (TTFT) and token per second (TPS), and perplexity. Both performance metrics are computed by the performance Python script and is executed as below:
+## Step 4 - Quality Evaluation
+Measure perplexity in the quantization pipeline. TTFT, throughput and KV-cache behavior are measured by `services/inference-runtime`, where all runtimes use the same client protocol.
 
 ``` shell
-python3 performance.py <path-to-quantized-model>
+python3 perplexity.py <path-to-quantized-model>
 ```
 
 OR
 
 ``` shell
-docker run --rm --gpus all -e HF_TOKEN=<hf_token> -v <path-to-model>:/usr/llm -v <host-path-to-logs>:/app/data --entrypoint python3 viannaarthur/quantize-qwen2.5 performance.py /usr/llm/Qwen2.5-0.5B-Instruct-GPTQ-4bit
+docker run --rm --gpus all -e HF_TOKEN=<hf_token> -v <path-to-model>:/usr/llm -v <host-path-to-logs>:/app/data --entrypoint python3 viannaarthur/quantize-qwen2.5 perplexity.py /usr/llm/Qwen2.5-0.5B-Instruct-GPTQ-4bit
 ```

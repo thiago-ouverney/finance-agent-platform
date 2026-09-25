@@ -31,6 +31,8 @@ function parseBaileysLogLevel(raw: string | undefined): BaileysLogLevel {
 export type EnvConfig = {
   allowedContacts: string[];
   openaiApiKey: string | undefined;
+  /** Endpoint OpenAI-compatible (Ollama, vLLM, llama.cpp ou OpenAI). */
+  openaiBaseUrl: string | undefined;
   openaiModel: string;
   /** Modelos que o admin pode atribuir (validação). Sempre inclui `openaiModel` ao carregar. */
   allowedOpenaiModels: string[];
@@ -138,11 +140,17 @@ function parseModelAllowlist(
 export function loadEnv(): EnvConfig {
   const allowedContacts = parseAllowedContacts(process.env.ALLOWED_CONTACTS);
 
-  const sessionPath = process.env.SESSION_PATH ?? ".baileys_auth";
+  const sessionPath =
+    process.env.WHATSAPP_SESSION_PATH ??
+    process.env.SESSION_PATH ??
+    ".baileys_auth";
   const dataDir = process.env.DATA_DIR ?? "data";
   const dataDirResolved = path.resolve(dataDir);
 
-  const openaiModel = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
+  const openaiModel =
+    process.env.WHATSAPP_INFERENCE_MODEL?.trim() ||
+    process.env.OPENAI_MODEL?.trim() ||
+    "gpt-4o-mini";
   const policyDbPath = path.resolve(
     process.env.POLICY_DB_PATH?.trim() ||
       path.join(dataDirResolved, "policy.sqlite")
@@ -159,7 +167,14 @@ export function loadEnv(): EnvConfig {
 
   return {
     allowedContacts,
-    openaiApiKey: process.env.OPENAI_API_KEY?.trim() || undefined,
+    openaiApiKey:
+      process.env.INFERENCE_API_TOKEN?.trim() ||
+      process.env.OPENAI_API_KEY?.trim() ||
+      undefined,
+    openaiBaseUrl:
+      process.env.WHATSAPP_INFERENCE_BASE_URL?.trim() ||
+      process.env.OPENAI_BASE_URL?.trim() ||
+      undefined,
     openaiModel,
     allowedOpenaiModels: parseModelAllowlist(
       process.env.ALLOWED_OPENAI_MODELS,
@@ -197,9 +212,15 @@ export function loadEnv(): EnvConfig {
     llmDailyBudgetTimezone: (
       process.env.LLM_DAILY_BUDGET_TIMEZONE ?? "UTC"
     ).trim(),
-    llmTimeoutMs: parseIntEnv(process.env.LLM_TIMEOUT_MS, 30_000, {
-      min: 1000,
-    }),
+    llmTimeoutMs: parseIntEnv(
+      process.env.WHATSAPP_INFERENCE_TIMEOUT_MS ?? process.env.LLM_TIMEOUT_MS,
+      30_000,
+      { min: 1000 }
+    ),
     llmLogJson: parseBoolEnv(process.env.LLM_LOG_JSON, false),
   };
+}
+
+export function hasLlmEndpoint(cfg: EnvConfig): boolean {
+  return Boolean(cfg.openaiApiKey || cfg.openaiBaseUrl);
 }

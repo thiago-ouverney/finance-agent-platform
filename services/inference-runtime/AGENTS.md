@@ -27,12 +27,6 @@ Comunicar a divisão de trabalho de forma breve quando relevante; não emitir um
 - Distinguir contexto em tokens, KV lógico estimado, ocupação real do pool KV e memória total da GPU. Não apresentar proxies como medição física.
 - Nunca apresentar dados ausentes como zero nem uma execução parcial como sucesso.
 - Não publicar pesos, ambientes, resultados, logs ou credenciais. Revisar os arquivos antes de qualquer push autorizado; usar autoria noreply e preservar a branch de histórico privado sem publicá-la.
-- Mudanças no código devem atualizar documentação e testes proporcionais ao risco. Regenerar fontes numerados e HTML quando necessário.
-
-## Documentação gerada
-
-`python scripts/build_code_reference.py` gera `docs/codigo-fontes.md`.
-`python scripts/build_docs.py` gera os HTMLs a partir dos Markdown.
-Não editar arquivos gerados como fonte primária.
+- Mudanças no código devem atualizar documentação Markdown e testes proporcionais ao risco.
 
 Estas instruções têm escopo do projeto. Não alteram configurações globais, permissões de ferramentas ou instruções de maior prioridade.

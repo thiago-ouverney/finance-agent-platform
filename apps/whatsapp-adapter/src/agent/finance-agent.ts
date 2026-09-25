@@ -1,4 +1,4 @@
-import type { EnvConfig } from "../config/env.js";
+import { hasLlmEndpoint, type EnvConfig } from "../config/env.js";
 import { allFeatureKeys, type FeatureKey } from "../policy/feature-registry.js";
 import type { EffectivePolicy } from "../policy/types.js";
 import {
@@ -274,7 +274,7 @@ function defaultNoDataReply(): string {
     "• Envie um CSV com colunas de descrição e valor, ou",
     "• Digite `/help` para ver comandos.",
     "",
-    "Para conversas com IA, configure `OPENAI_API_KEY` no servidor.",
+    "Para conversas com IA, configure o endpoint local ou uma chave de API no servidor.",
   ].join("\n");
 }
 
@@ -316,9 +316,7 @@ async function dispatchCommand(
       const stmts = await store.loadStatements(contactId);
       const n = stmts.invoices.length;
       const llm =
-        cfg.openaiApiKey !== undefined &&
-        cfg.openaiApiKey.length > 0 &&
-        llmFeatureEnabled
+        hasLlmEndpoint(cfg) && llmFeatureEnabled
           ? `Modelo (IA): ativo (${effectiveModel})`
           : "Modelo (IA): desligado — apenas análise local";
       const lines = [
@@ -593,7 +591,7 @@ export async function handleUserMessage(
     }
     await store.appendMessage(contactId, { role: "user", text: trimmed });
     const llmFeat =
-      Boolean(cfg.openaiApiKey) && effective.features.has("finance.llm_chat");
+      hasLlmEndpoint(cfg) && effective.features.has("finance.llm_chat");
     const out = await dispatchCommand(
       cmd,
       cfg,
@@ -659,7 +657,7 @@ export async function handleUserMessage(
   }
 
   const llmAllowed =
-    Boolean(cfg.openaiApiKey) && effective.features.has("finance.llm_chat");
+    hasLlmEndpoint(cfg) && effective.features.has("finance.llm_chat");
 
   if (!llmAllowed) {
     let reply: string;

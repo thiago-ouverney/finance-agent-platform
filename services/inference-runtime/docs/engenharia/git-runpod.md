@@ -18,12 +18,12 @@ São comandos de instalação Linux. Não os execute no macOS. Outras distribui�
 
 ## 2. Clonar um repositório público
 
-O repositório deste projeto é `yanwerneck/llm_local_inference_masters`. O último argumento de `clone` escolhe o nome da pasta local:
+O runtime agora pertence ao monorepo `thiago-ouverney/finance-agent-platform`. O último argumento de `clone` escolhe o nome da pasta local:
 
 ```bash
 cd /workspace
-git clone https://github.com/yanwerneck/llm_local_inference_masters.git chatbot-runtime-bench
-cd chatbot-runtime-bench
+git clone https://github.com/thiago-ouverney/finance-agent-platform.git
+cd finance-agent-platform/services/inference-runtime
 git status
 ```
 
@@ -34,7 +34,7 @@ Você **não precisa configurar nome/e-mail para apenas baixar e executar**. Ago
 ## 3. Atualizar depois
 
 ```bash
-cd /workspace/llm_local_inference_masters
+cd /workspace/finance-agent-platform
 git status
 git pull --ff-only
 ```
@@ -65,7 +65,7 @@ O diretório guarda a chave; `chmod 700` limita seu acesso ao usuário propriet�
 No GitHub, abra o repositório → Settings → Deploy keys → Add deploy key. Cole a chave pública e deixe **Allow write access desmarcado**. Nunca cole ou compartilhe `id_ed25519` sem `.pub`.
 
 ```bash
-git -c core.sshCommand='ssh -i /workspace/chatbench-ssh/id_ed25519 -o IdentitiesOnly=yes' clone git@github.com:yanwerneck/llm_local_inference_masters.git /workspace/llm_local_inference_masters
+git -c core.sshCommand='ssh -i /workspace/chatbench-ssh/id_ed25519 -o IdentitiesOnly=yes' clone git@github.com:thiago-ouverney/finance-agent-platform.git /workspace/finance-agent-platform
 ```
 
 Na primeira conexão, confira a impressão digital apresentada com a [lista oficial do GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints) antes de aceitar. Não desative a verificação do host.
@@ -73,7 +73,7 @@ Na primeira conexão, confira a impressão digital apresentada com a [lista ofic
 Para que os próximos pulls usem a mesma chave:
 
 ```bash
-cd /workspace/llm_local_inference_masters
+cd /workspace/finance-agent-platform
 git config core.sshCommand 'ssh -i /workspace/chatbench-ssh/id_ed25519 -o IdentitiesOnly=yes'
 ```
 
@@ -109,7 +109,7 @@ Nome/e-mail são autoria dos commits, não credenciais de login. Use o endereço
 Se ainda não há `origin`, associe o repositório criado:
 
 ```bash
-git remote add origin git@github.com:yanwerneck/llm_local_inference_masters.git
+git remote add origin git@github.com:thiago-ouverney/finance-agent-platform.git
 git push -u origin main
 ```
 
