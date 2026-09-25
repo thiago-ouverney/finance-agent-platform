@@ -1,0 +1,197 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fluxo completo do Makefile</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f6f3ec;color:#193835;font:17px/1.8 system-ui,sans-serif}main{max-width:1020px;margin:auto;padding:48px 28px}h1{font-size:clamp(36px,6vw,66px);line-height:1.1;letter-spacing:-1.8px}h2{font-size:28px;line-height:1.3;border-top:1px solid #cdd8ce;padding-top:32px;margin-top:44px;scroll-margin-top:20px}h3{font-size:22px}a{color:#136d58;text-underline-offset:4px}a:focus-visible{outline:3px solid #b54e27;outline-offset:3px}pre{overflow:auto;background:#193835;color:#f4f7ee;padding:22px;border-radius:12px;font-size:14px;line-height:1.6}code{font-family:ui-monospace,monospace;overflow-wrap:anywhere}p code,li code,td code{background:#e0e9df;padding:2px 5px;border-radius:4px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{border-bottom:1px solid #cdd8ce;padding:12px;text-align:left;vertical-align:top}th{background:#e1eade}li{margin:9px 0}.table-wrap{overflow:auto}.eyebrow{font-size:12px;letter-spacing:2px;color:#136d58;font-weight:750}.toc{background:#fffdf7;border:1px solid #d3ddd0;padding:15px 25px;border-radius:12px;font-size:14px}.toc ul{list-style:none;padding-left:18px}blockquote{border-left:4px solid #b54e27;background:#fff0de;padding:8px 22px;margin:25px 0}footer{border-top:1px solid #cdd8ce;margin-top:40px;padding-top:20px;font-size:13px}.nav{display:flex;flex-wrap:wrap;gap:20px;font-size:14px}@media(max-width:650px){main{padding:25px 18px}body{font-size:16px}h2{font-size:25px}}@media print{body{background:white;font-size:11pt}h1{font-size:32pt}nav,.toc{display:none}pre{white-space:pre-wrap;color:black;background:#eee}.table-wrap{overflow:visible}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style></head><body><main><div class="eyebrow">CHATBOT RUNTIME BENCH · GUIDELLM · UM USUÁRIO</div><nav class="nav"><a href="../benchmark/bench-explicado.html">Bench explicado</a><a href="../benchmark/metodologia.html">Método</a><a href="make-fluxo.html">Make</a><a href="../engenharia/git-runpod.html">Git no pod</a><a href="../../README.md">Instalação e execução</a></nav><div class="toc">
+<ul>
+<li><a href="#fluxo-completo-do-makefile">Fluxo completo do Makefile</a><ul>
+<li><a href="#1-selecao-do-experimento">1. Seleção do experimento</a></li>
+<li><a href="#2-preparacao">2. Preparação</a><ul>
+<li><a href="#install-benchmark">install-benchmark</a></li>
+<li><a href="#download-model">download-model</a></li>
+<li><a href="#download-tokenizer">download-tokenizer</a></li>
+<li><a href="#verify-gguf">verify-gguf</a></li>
+<li><a href="#validacoes-finais">Validações finais</a></li>
+</ul>
+</li>
+<li><a href="#3-preparacao-do-ollama">3. Preparação do Ollama</a></li>
+<li><a href="#4-bateria-formal">4. Bateria formal</a></li>
+<li><a href="#5-smoke-e-sweep-rapido-de-integracao">5. Smoke e sweep rápido de integração</a></li>
+<li><a href="#6-argumentos-experimentais">6. Argumentos experimentais</a></li>
+<li><a href="#7-sweep-de-kv">7. Sweep de KV</a></li>
+<li><a href="#8-onde-estao-os-resultados">8. Onde estão os resultados</a></li>
+<li><a href="#9-o-que-nao-e-medido-diretamente">9. O que não é medido diretamente</a></li>
+<li><a href="#10-estado-atual-da-validacao-no-pod">10. Estado atual da validação no Pod</a></li>
+<li><a href="#11-sequencia-recomendada">11. Sequência recomendada</a><ul>
+<li><a href="#profiling">Profiling</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+<h1 id="fluxo-completo-do-makefile">Fluxo completo do Makefile</h1>
+<p>Este documento explica o que acontece quando cada alvo é executado. O objetivo é separar preparação, lançamento, medição e diagnóstico.</p>
+<p>Requer GNU Make com suporte a <code>.ONESHELL</code> (3.82 ou mais recente). O Make 3.81 fornecido pelo macOS não executa corretamente receitas que compartilham variáveis de shell; use GNU Make atualizado (<code>gmake</code>) ou execute no pod.</p>
+<h2 id="1-selecao-do-experimento">1. Seleção do experimento</h2>
+<p><code>MODEL_SIZE</code> aceita <code>7B</code> ou <code>14B</code>. O Make deriva o GGUF, tokenizer, config JSON e launch JSON correspondentes. O padrão é <code>7B</code>, usando o artefato <code>arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf</code>.</p>
+<p>Os launch/configs do vLLM usam por padrão <code>--gpu-memory-utilization 0.95</code>, deixando 5% de margem na VRAM. É um orçamento de memória, não um teto de 95% para utilização computacional da GPU. No Pod observado, <code>1.0</code> falhou porque havia 23,30 GiB livres de 23,56 GiB, menos que o orçamento integral solicitado.</p>
+<pre><code class="language-bash">make prepare-vllm MODEL_SIZE=7B
+make prepare-llama MODEL_SIZE=7B
+make prepare-ollama MODEL_SIZE=7B
+</code></pre>
+<p>Para preparar todos os runtimes em sequência:</p>
+<pre><code class="language-bash">make prepare-all MODEL_SIZE=7B
+</code></pre>
+<p>Os caminhos podem ser sobrescritos:</p>
+<pre><code class="language-bash">make prepare-all MODEL_SIZE=7B \
+  MODEL_7B_GGUF=/workspace/models/arthur/qwen7b.gguf \
+  MODEL_7B_TOKENIZER=/workspace/models/qwen7b-tokenizer
+</code></pre>
+<h2 id="2-preparacao">2. Preparação</h2>
+<p>Cada alvo <code>prepare-&lt;runtime&gt;</code> depende de <code>prepare-benchmark</code>, que é a etapa comum de <code>install-benchmark</code>, <code>download-model</code>, <code>download-tokenizer</code> e <code>verify-gguf</code>. Depois da primeira preparação, use <code>PREPARE_OFFLINE=1</code> para reutilizar o ambiente e os arquivos locais sem pip nem downloads. <code>prepare-all</code> encadeia os três runtimes. As verificações de GGUF, imports, tokenizer e JSONs continuam obrigatórias; dependências ausentes causam falha.</p>
+<pre><code class="language-bash">make smoke-vllm PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
+make smoke-llama PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
+make smoke-ollama PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
+make smoke-all PREPARE_OFFLINE=1 BENCH_STARTUP_TIMEOUT=300
+</code></pre>
+<p><code>BENCH_STARTUP_TIMEOUT</code> vale para os três smokes. <code>VLLM_EXTRA_ARGS</code> é repassado tanto à bateria base quanto ao sweep.</p>
+<h3 id="install-benchmark"><code>install-benchmark</code></h3>
+<p>Cria <code>BENCH_VENV</code> usando <code>SYSTEM_PYTHON</code> quando necessário, atualiza o pip e instala <code>requirements.txt</code>. O Python efetivamente usado pelos demais alvos é <code>PYTHON</code>. Esse ambiente é do cliente do benchmark; não o misture com o venv do vLLM ou com o ambiente de conversão do llama.cpp.</p>
+<h3 id="download-model"><code>download-model</code></h3>
+<p>Cria o diretório pai e executa <code>hf download</code> com <code>HF_HUB_OFFLINE=0</code>. O repositório e o nome do arquivo vêm de <code>HF_GGUF_REPO</code> e <code>HF_GGUF_FILENAME</code>. O alvo verifica que o arquivo chegou exatamente ao caminho esperado.</p>
+<h3 id="download-tokenizer"><code>download-tokenizer</code></h3>
+<p>Cria <code>TOKENIZER_DIR</code> e usa <code>huggingface_hub.snapshot_download</code> com <code>allow_patterns</code> para baixar <code>config.json</code>, <code>tokenizer*</code>, <code>special_tokens_map.json</code> e <code>chat_template.jinja</code>. Isso evita uma incompatibilidade da CLI <code>hf</code> em que a combinação de nomes posicionais e <code>--include</code> baixava somente <code>config.json</code>. O alvo exige <code>config.json</code>, <code>tokenizer_config.json</code> e <code>tokenizer.json</code>; não baixa pesos do checkpoint base.</p>
+<h3 id="verify-gguf"><code>verify-gguf</code></h3>
+<p>Verifica presença, tamanho, assinatura binária <code>GGUF</code> e imprime SHA-256. Não interpreta os tensores e não inicia GPU.</p>
+<h3 id="validacoes-finais">Validações finais</h3>
+<p>O alvo instala <code>requirements.txt</code> no <code>PYTHON</code> escolhido, importa as bibliotecas do cliente e valida JSONs. A presença do runtime é verificada separadamente por <code>prepare-vllm</code>, <code>prepare-llama</code> ou <code>prepare-ollama</code>; assim, preparar o modelo não é bloqueado por um runtime que ainda não foi instalado. No caso do llama.cpp, <code>prepare-llama</code> procura o <code>llama-server</code> já instalado no <code>PATH</code>, como ocorre na imagem do pod, e o launch JSON usa o comando <code>llama-server</code>. A compilação local fica disponível somente quando necessária, via <code>make build-llama</code>.</p>
+<p><code>prepare-llama</code> também exige CUDA por padrão (<code>REQUIRE_GPU=1</code>). O Make detecta automaticamente o plugin Ollama em <code>cuda_v12</code> ou, na ausência dele, <code>cuda_v13</code>. Quando a distribuição usa plugins de backend em outro local, <code>LLAMA_BACKEND_PATH</code> deve ser o caminho completo do <code>.so</code>, por exemplo <code>/caminho/cuda_v13/libggml-cuda.so</code>. O Make define <code>GGML_BACKEND_PATH</code> com esse arquivo e inclui seu diretório em <code>LD_LIBRARY_PATH</code> antes de executar <code>--list-devices</code>. Use <code>REQUIRE_GPU=0</code> somente para uma execução CPU intencional.
+Os três templates seguem esse mesmo contrato: chamam <code>vllm</code>, <code>llama-server</code> e <code>ollama</code> pelo <code>PATH</code>, sem assumir caminhos internos de venv ou <code>/usr/local/bin</code>. Use <code>VLLM_BIN</code>, <code>LLAMA_SERVER_BIN</code> ou <code>OLLAMA_BIN</code> para sobrescrever o executável quando a imagem utilizar outro local.</p>
+<p><code>prepare-vllm</code> também executa <code>check-vllm-gguf</code>, que usa <code>VLLM_PYTHON</code> (ou tenta resolver o Python do executável encontrado) e importa <code>vllm_gguf_plugin</code> nesse mesmo ambiente. Para um executável wrapper, informe explicitamente <code>VLLM_PYTHON=/caminho/do/python-do-vllm</code>. Sem o plugin, o vLLM pode tentar interpretar o arquivo GGUF como JSON e produzir <code>config file ... .gguf is not a valid JSON file</code>. A correção é instalar <code>vllm-gguf-plugin</code> no ambiente do vLLM; não se instala esse pacote no venv do benchmark. llama.cpp e Ollama não precisam do plugin porque carregam GGUF nativamente.</p>
+<h2 id="3-preparacao-do-ollama">3. Preparação do Ollama</h2>
+<p><code>prepare-ollama</code> usa o arquivo GGUF local em um <code>Modelfile</code> temporário e executa <code>ollama create</code>. O alias é <code>qwen7b-q8-gguf</code> ou <code>qwen14b-q8-gguf</code>. Não há <code>ollama pull</code>: o modelo deve vir do SSD informado. Se a API configurada já estiver ativa, o script a reutiliza e a preserva. Se não estiver, inicia um daemon temporário próprio, aguarda a API, cria/verifica o alias e encerra apenas o processo que criou. Essa tolerância vale para a preparação; <code>bench-ollama</code>, como os demais launchers medidos, requer a porta livre para possuir e cronometrar o servidor.</p>
+<h2 id="4-bateria-formal">4. Bateria formal</h2>
+<p><code>bench</code> chama <code>bench-all</code>. O agregador executa <code>bench-vllm</code>, <code>bench-llama</code> e <code>bench-ollama</code>, guarda um código de saída para cada um, continua após falhas e retorna código diferente de zero no final se algum falhou.</p>
+<p>Cada alvo individual:</p>
+<ol>
+<li>verifica o mesmo GGUF local;</li>
+<li>inicia o runtime pelo launcher JSON;</li>
+<li>espera <code>/v1/models</code> responder com o alias esperado;</li>
+<li>mede a primeira requisição sem aquecimento oculto;</li>
+<li>executa warmup e medida para <code>short</code>, <code>medium</code> e <code>long</code>;</li>
+<li>mede TTFT, Tokens/s e velocidade efetiva;</li>
+<li>coleta GPU, CPU, RAM, SSD, eventos e KV quando disponível;</li>
+<li>encerra somente o grupo de processos criado;</li>
+<li>executa o sweep de contexto/KV.</li>
+</ol>
+<p>São 50 requisições por cenário, 1 repetição e 3 aquecimentos. A bateria base usa <code>BENCH_MODE=replay</code>: as 50 requisições percorrem as 50 perguntas de <code>qwen_chat_bench_v2.json</code>, com histórico e respostas <code>assistant</code> fixos. Os três warmups usam <code>qwen_chat_warmup_v1.json</code>, que não é reutilizado na medição. O perfil é síncrono, portanto não é um benchmark de concorrência.</p>
+<p>Por padrão, <code>BENCH_MODE=replay</code> percorre <code>workloads/conversations/qwen_chat_bench_v2.json</code>, com 50 perguntas e respostas <code>assistant</code> fixas. Cada request seleciona um turno distinto e envia o histórico até ele. O warmup usa <code>qwen_chat_warmup_v1.json</code>, separado da medição. <code>closed-loop</code> continua disponível para colocar respostas reais no histórico; <code>independent</code> deve ser solicitado explicitamente quando a intenção for medir mensagens isoladas. Os blocos conversacionais gravam <code>*-turns.json</code> e <code>*-conversation.json</code> além dos brutos e CSVs.</p>
+<p>A espera de startup não aceita apenas um HTTP 200: o alias configurado precisa aparecer em <code>GET /v1/models</code>. Enquanto aguarda, o log periódico identifica o endpoint consultado, o modelo esperado e a última observação ou erro. Isso torna distinguível uma API inacessível de um servidor vivo que expõe o alias errado.</p>
+<h2 id="5-smoke-e-sweep-rapido-de-integracao">5. Smoke e sweep rápido de integração</h2>
+<p>Há smoke equivalente para cada runtime:</p>
+<pre><code class="language-bash">make smoke-vllm MODEL_SIZE=7B
+make smoke-llama MODEL_SIZE=7B
+make smoke-ollama MODEL_SIZE=7B
+make smoke-all MODEL_SIZE=7B
+</code></pre>
+<p>Para exercitar também a variação de contexto sem aguardar a bateria formal:</p>
+<pre><code class="language-bash">make quick-sweep-vllm MODEL_SIZE=7B
+make quick-sweep-llama MODEL_SIZE=7B
+make quick-sweep-ollama MODEL_SIZE=7B
+</code></pre>
+<p>O sweep rápido testa os pontos de 1024 e 5489 tokens até o limite padrão de 8192, com 1 requisição, 1 repetição e nenhum aquecimento por ponto. É diagnóstico de integração, não resultado estatístico nem substituto do sweep formal.</p>
+<h2 id="6-argumentos-experimentais">6. Argumentos experimentais</h2>
+<p>Os launchers JSON fornecem a configuração base. Variáveis <code>VLLM_EXTRA_ARGS</code>, <code>LLAMA_EXTRA_ARGS</code> e <code>OLLAMA_EXTRA_ARGS</code> são acrescentadas ao argv sem serem sanitizadas ou corrigidas.</p>
+<pre><code class="language-bash">make bench-vllm MODEL_SIZE=7B \
+  VLLM_EXTRA_ARGS='--gpu-memory-utilization 0.95 --enforce-eager'
+</code></pre>
+<p>Esses argumentos aparecem no <code>lifecycle.json</code>. Se o runtime rejeitar a combinação, a execução falha e o <code>server.log</code> é a evidência.</p>
+<h2 id="7-sweep-de-kv">7. Sweep de KV</h2>
+<p>Depois da bateria base, <code>run_kv_sweep.py</code> copia o launcher para uma pasta temporária e chama <code>bench.py</code> novamente. O padrão começa em 1024 tokens e soma 256 MB de KV lógico por ponto; no Qwen2.5 7B isso produz aproximadamente 1024, 5489, 9954 e 14419 tokens. Em modo <code>replay</code>, cada ponto seleciona e cicla apenas os históricos da fixture que cabem no limite <code>ctx&lt;N&gt;</code>. O <code>max_model_len</code> permanece pelo menos no <code>context_window</code> configurado no runtime, sem o teto artificial <code>N + 128 + 256</code>.</p>
+<p>O sweep repassa <code>SWEEP_MODE</code>, <code>SWEEP_CONVERSATION_TURNS</code> e <code>SWEEP_CONVERSATION_FIXTURE</code> para <code>bench.py</code>, permitindo varrer contexto com a mesma política conversacional da bateria base ou com uma política própria do sweep. O passo formal é <code>SWEEP_MEMORY_STEP_MB=256</code>: o script converte esse orçamento de memória em tokens com <code>KV_BYTES_PER_TOKEN</code> (57.344 bytes/token no Qwen2.5 7B em KV FP16; 196.608 no 14B) e registra os dois valores no manifesto.</p>
+<ul>
+<li>vLLM: altera <code>--max-model-len</code>;</li>
+<li>llama.cpp: altera <code>--ctx-size</code>;</li>
+<li>Ollama: mantém a política configurada externamente, pois <code>ollama serve</code> não possui uma flag universal equivalente.</li>
+</ul>
+<p>O primeiro código de saída diferente de zero encerra o sweep. Nenhum ponto falho é convertido em zero ou substituído por outro modelo.</p>
+<h2 id="8-onde-estao-os-resultados">8. Onde estão os resultados</h2>
+<p>Cada execução fica em <code>results/&lt;runtime&gt;/&lt;timestamp&gt;/&lt;nome-humano&gt;/</code>, com subpastas por formato:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Arquivo</th>
+<th>Função</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>html/summary.html</code></td>
+<td>leitura humana, tabelas e gráficos SVG</td>
+</tr>
+<tr>
+<td><code>html/telemetry-memory.svg</code></td>
+<td>memória ocupada da GPU ao longo do tempo</td>
+</tr>
+<tr>
+<td><code>html/telemetry-gpu-util.svg</code></td>
+<td>GPU-utilização ao longo do tempo</td>
+</tr>
+<tr>
+<td><code>json/summary.json</code></td>
+<td>métricas estruturadas</td>
+</tr>
+<tr>
+<td><code>csv/gpu.csv</code></td>
+<td>amostras NVIDIA</td>
+</tr>
+<tr>
+<td><code>csv/system.csv</code></td>
+<td>CPU/RAM/disco do host</td>
+</tr>
+<tr>
+<td><code>csv/events.csv</code></td>
+<td>fases e timestamps</td>
+</tr>
+<tr>
+<td><code>json/telemetry-summary.json</code></td>
+<td>agregação por fase</td>
+</tr>
+<tr>
+<td><code>csv/kv-cache.csv</code></td>
+<td>gauge KV do servidor, se existir</td>
+</tr>
+<tr>
+<td><code>logs/server.log</code></td>
+<td>log do runtime iniciado</td>
+</tr>
+<tr>
+<td><code>json/lifecycle.json</code></td>
+<td>readiness, primeira resposta, argv e encerramento</td>
+</tr>
+<tr>
+<td><code>csv/telemetry-timeseries.csv</code></td>
+<td>série temporal da GPU com <code>elapsed_s</code>, VRAM ocupada e utilização</td>
+</tr>
+</tbody>
+</table></div>
+<p>As métricas de throughput dos requests não são extraídas do <code>server.log</code>. O cliente abre SSE e registra relógios monotônicos por requisição: início, primeiro evento com conteúdo e fim. <code>decode_tokens_per_second</code> usa tokens de <code>usage</code> dividido pelo intervalo primeiro–último evento; <code>end_to_end_tokens_per_second</code> divide pela latência total. O <code>Avg generation throughput</code> periódico do vLLM permanece apenas como observabilidade agregada. Ausência de <code>usage</code> produz <code>null</code>, e uma resposta de um token não recebe inter-token latency zero.</p>
+<h2 id="9-o-que-nao-e-medido-diretamente">9. O que não é medido diretamente</h2>
+<p><code>nvidia-smi</code> mostra VRAM total usada pela GPU, não bytes exclusivamente do KV. CPU/RAM/SSD são contadores observacionais do host. O benchmark não mede o tempo de cada cópia PCIe ou RAM↔VRAM; isso exige Nsight Systems/Compute ou instrumentação CUDA no runtime.</p>
+<p>Para copiar resultados, execute localmente: <code>make pull-results POD_SSH=root@HOST_DO_POD</code>. O alvo aceita <code>POD_PORT</code>, <code>POD_SSH_KEY</code>, <code>REMOTE_RESULTS_DIR</code> e <code>LOCAL_RESULTS_DIR</code>, e não apaga resultados locais. Para <code>ssh.runpod.io</code>, detecta o proxy, cria um tar temporário no pod, coordena <code>runpodctl send/receive</code> e extrai os resultados automaticamente; instale o cliente local com <code>brew install runpod/runpodctl/runpodctl</code>. Para SSH TCP direto, usa <code>scp</code>. <code>make check-profilers</code> verifica <code>nsys</code> e <code>ncu</code>; profiling é complementar e deve ser executado separadamente, pois altera a latência.</p>
+<p>O profiling automatizado fica em <code>Makefile.profiling</code>, separado da bateria oficial. Execute <code>make -f Makefile.profiling profile-vllm-nsys MODEL_SIZE=7B</code> ou o alvo equivalente de <code>ncu</code>/llama.cpp em outro ambiente. O alvo inicia o servidor em primeiro plano; envie uma única requisição curta em outro terminal e encerre com <code>Ctrl-C</code>. Os relatórios ficam em <code>results/profiling/</code>. Não instale/remova Nsight durante <code>bench-vllm</code>, pois isso mudaria o ambiente e contaminaria a medição.</p>
+<h2 id="10-estado-atual-da-validacao-no-pod">10. Estado atual da validação no Pod</h2>
+<p>A integração foi validada ao vivo em 22/09/2026 no RunPod com uma RTX 3090 e o GGUF 7B. Preparação offline, três smokes, três quick sweeps e <code>bench-all</code> reduzido passaram; o agregado terminou com <code>vLLM=0 llama.cpp=0 Ollama=0</code>. As métricas e os caminhos dos artefatos estão em <a href="../benchmark/resultados-pod-20260922.md">resultados-pod-20260922.md</a>.</p>
+<p>O vLLM foi executado com <code>--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80</code>. O <code>EngineDeadError</code> visto no encerramento do sweep ocorre após respostas HTTP 200 e o SIGTERM intencional do harness; não foi OOM e o alvo retornou zero.</p>
+<h2 id="11-sequencia-recomendada">11. Sequência recomendada</h2>
+<pre><code class="language-bash">make prepare-all MODEL_SIZE=7B
+make smoke-vllm MODEL_SIZE=7B
+make smoke-llama MODEL_SIZE=7B
+make smoke-ollama MODEL_SIZE=7B
+make quick-sweep-vllm MODEL_SIZE=7B
+make quick-sweep-llama MODEL_SIZE=7B
+make quick-sweep-ollama MODEL_SIZE=7B
+make bench-all MODEL_SIZE=7B
+</code></pre>
+<p>Só altere parâmetros depois de obter uma execução base válida. Cada alteração deve ser registrada na linha do Make e no <code>lifecycle.json</code>.</p>
+<h3 id="profiling">Profiling</h3>
+<p><code>Makefile.profiling</code> resolve o cliente Python a partir do diretório do próprio Makefile e chama os wrappers com Bash, sem exigir bit executável no checkout. Cada execução cria o subdiretório do relatório antes de iniciar o profiler. Os alvos de profiling iniciam servidores interativos; envie uma requisição curta e encerre com Ctrl-C para finalizar o relatório.</p><footer>HTML autônomo, sem telemetria ou dependências externas. Fontes e limitações no texto. Editável em Markdown; gere novamente com python scripts/build_docs.py.</footer></main></body></html>

@@ -1,0 +1,13 @@
+{
+  "name": "qwen_chat_warmup_v1",
+  "version": 1,
+  "description": "Fixture descartavel e distinta da medicao formal.",
+  "system": "Voce esta em uma fase de aquecimento descartavel. Responda de forma breve e objetiva.",
+  "turns": [
+    {"user": "Liste tres cuidados para iniciar um servidor de inferencia local.", "assistant": "Verifique pesos e tokenizer locais, confirme a API de readiness e registre o argv efetivo."},
+    {"user": "Explique em uma frase por que o primeiro token pode atrasar.", "assistant": "O runtime pode ainda estar compilando kernels, alocando buffers ou preparando o cache."},
+    {"user": "Diga uma diferenca pratica entre prefill e decode.", "assistant": "Prefill processa a entrada antes do primeiro token; decode gera os tokens de saida seguintes."},
+    {"user": "Qual telemetria ajuda a investigar limite de GPU?", "assistant": "VRAM usada, utilizacao da GPU, logs de alocacao e ocupacao do pool KV quando disponivel."},
+    {"user": "Por que warmup nao entra no percentil final?", "assistant": "Porque ele prepara o processo e nao representa a fase formal que esta sendo comparada."}
+  ]
+}

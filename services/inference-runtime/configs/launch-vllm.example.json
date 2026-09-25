@@ -1,0 +1,15 @@
+[
+  "vllm",
+  "serve",
+  "/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf",
+  "--tokenizer",
+  "/workspace/models/Qwen2.5-14B-tokenizer",
+  "--served-model-name",
+  "qwen14b-q8-gguf",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  "8000",
+  "--max-model-len",
+  "4096"
+]

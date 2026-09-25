@@ -1,0 +1,91 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Git no RunPod</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f6f3ec;color:#193835;font:17px/1.8 system-ui,sans-serif}main{max-width:1020px;margin:auto;padding:48px 28px}h1{font-size:clamp(36px,6vw,66px);line-height:1.1;letter-spacing:-1.8px}h2{font-size:28px;line-height:1.3;border-top:1px solid #cdd8ce;padding-top:32px;margin-top:44px;scroll-margin-top:20px}h3{font-size:22px}a{color:#136d58;text-underline-offset:4px}a:focus-visible{outline:3px solid #b54e27;outline-offset:3px}pre{overflow:auto;background:#193835;color:#f4f7ee;padding:22px;border-radius:12px;font-size:14px;line-height:1.6}code{font-family:ui-monospace,monospace;overflow-wrap:anywhere}p code,li code,td code{background:#e0e9df;padding:2px 5px;border-radius:4px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{border-bottom:1px solid #cdd8ce;padding:12px;text-align:left;vertical-align:top}th{background:#e1eade}li{margin:9px 0}.table-wrap{overflow:auto}.eyebrow{font-size:12px;letter-spacing:2px;color:#136d58;font-weight:750}.toc{background:#fffdf7;border:1px solid #d3ddd0;padding:15px 25px;border-radius:12px;font-size:14px}.toc ul{list-style:none;padding-left:18px}blockquote{border-left:4px solid #b54e27;background:#fff0de;padding:8px 22px;margin:25px 0}footer{border-top:1px solid #cdd8ce;margin-top:40px;padding-top:20px;font-size:13px}.nav{display:flex;flex-wrap:wrap;gap:20px;font-size:14px}@media(max-width:650px){main{padding:25px 18px}body{font-size:16px}h2{font-size:25px}}@media print{body{background:white;font-size:11pt}h1{font-size:32pt}nav,.toc{display:none}pre{white-space:pre-wrap;color:black;background:#eee}.table-wrap{overflow:visible}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style></head><body><main><div class="eyebrow">CHATBOT RUNTIME BENCH · GUIDELLM · UM USUÁRIO</div><nav class="nav"><a href="../benchmark/bench-explicado.html">Bench explicado</a><a href="../benchmark/metodologia.html">Método</a><a href="../make/make-fluxo.html">Make</a><a href="git-runpod.html">Git no pod</a><a href="../../README.md">Instalação e execução</a></nav><div class="toc">
+<ul>
+<li><a href="#git-no-runpod-sem-misterio">Git no RunPod, sem mistério</a><ul>
+<li><a href="#1-instalar-git-na-vm">1. Instalar Git na VM</a></li>
+<li><a href="#2-clonar-um-repositorio-publico">2. Clonar um repositório público</a></li>
+<li><a href="#3-atualizar-depois">3. Atualizar depois</a></li>
+<li><a href="#4-se-o-repositorio-for-privado">4. Se o repositório for privado</a></li>
+<li><a href="#5-publicar-o-projeto-a-partir-do-seu-mac">5. Publicar o projeto a partir do seu Mac</a><ul>
+<li><a href="#autoria-nao-e-autenticacao">Autoria não é autenticação</a></li>
+</ul>
+</li>
+<li><a href="#6-rodar-sem-github-por-enquanto">6. Rodar sem GitHub por enquanto</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<h1 id="git-no-runpod-sem-misterio">Git no RunPod, sem mistério</h1>
+<p><strong>Git</strong> é o programa que mantém o histórico do código. <strong>GitHub</strong> é um serviço que hospeda repositórios. Não existe “instalar minha conta Git” no pod: você instala Git e baixa seu repositório. Para clonar um repositório público, nem login é necessário.</p>
+<h2 id="1-instalar-git-na-vm">1. Instalar Git na VM</h2>
+<p>No terminal de uma imagem Ubuntu/Debian, como root:</p>
+<pre><code class="language-bash">apt-get update
+apt-get install -y git ca-certificates openssh-client
+git --version
+</code></pre>
+<p><code>update</code> atualiza a lista de pacotes; <code>install</code> instala Git, certificados HTTPS e cliente SSH; <code>--version</code> confirma a instalação. Se não estiver como root e sua imagem permitir, prefixe os comandos de instalação com <code>sudo</code>.</p>
+<p>São comandos de instalação Linux. Não os execute no macOS. Outras distribuições podem usar outro gerenciador; veja a <a href="https://git-scm.com/book/en/v2/Getting-Started-Installing-Git">documentação oficial de instalação do Git</a>.</p>
+<h2 id="2-clonar-um-repositorio-publico">2. Clonar um repositório público</h2>
+<p>O repositório deste projeto é <code>yanwerneck/llm_local_inference_masters</code>. O último argumento de <code>clone</code> escolhe o nome da pasta local:</p>
+<pre><code class="language-bash">cd /workspace
+git clone https://github.com/yanwerneck/llm_local_inference_masters.git chatbot-runtime-bench
+cd chatbot-runtime-bench
+git status
+</code></pre>
+<p><code>clone</code> baixa código e histórico para uma pasta nova. <code>status</code> mostra a situação local; não envia nada à internet. Use uma pasta persistente do pod, mas confirme as regras de retenção e cobrança do volume: código e resultados podem desaparecer ao encerrar um pod sem armazenamento persistente.</p>
+<p>Você <strong>não precisa configurar nome/e-mail para apenas baixar e executar</strong>. Agora siga a instalação do <a href="../../README.md">README</a>, criando um venv separado.</p>
+<h2 id="3-atualizar-depois">3. Atualizar depois</h2>
+<pre><code class="language-bash">cd /workspace/llm_local_inference_masters
+git status
+git pull --ff-only
+</code></pre>
+<p><code>pull --ff-only</code> traz atualizações sem criar um merge automático. Se houver alterações locais conflitantes, pare e preserve-as: não use <code>reset --hard</code> para “resolver rápido”. Copie suas configurações antes de reorganizar qualquer coisa.</p>
+<p>Se as dependências mudaram, ative o venv e reinstale <code>requirements.txt</code>. Não atualize o código no meio da bateria comparativa. Registre o commit usado:</p>
+<pre><code class="language-bash">git rev-parse HEAD
+</code></pre>
+<p>Esse hash identifica uma versão do código, não dos pesos do modelo.</p>
+<h2 id="4-se-o-repositorio-for-privado">4. Se o repositório for privado</h2>
+<p>Para um pod descartável, prefira uma <strong>deploy key somente leitura</strong>, específica deste repositório. Não copie sua chave SSH pessoal do laptop para a VM. A <a href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys">documentação de deploy keys do GitHub</a> explica permissões e limitações.</p>
+<pre><code class="language-bash">mkdir -p /workspace/chatbench-ssh
+chmod 700 /workspace/chatbench-ssh
+ssh-keygen -t ed25519 -C 'runpod-chatbench-readonly' -f /workspace/chatbench-ssh/id_ed25519
+cat /workspace/chatbench-ssh/id_ed25519.pub
+</code></pre>
+<p>O diretório guarda a chave; <code>chmod 700</code> limita seu acesso ao usuário proprietário. <code>ssh-keygen</code> cria o par de chaves e pergunta uma senha opcional. Se o arquivo já existir, <strong>não sobrescreva</strong>: escolha outro nome. O <code>cat</code> mostra somente a chave <strong>pública</strong>, terminada em <code>.pub</code>.</p>
+<p>No GitHub, abra o repositório → Settings → Deploy keys → Add deploy key. Cole a chave pública e deixe <strong>Allow write access desmarcado</strong>. Nunca cole ou compartilhe <code>id_ed25519</code> sem <code>.pub</code>.</p>
+<pre><code class="language-bash">git -c core.sshCommand='ssh -i /workspace/chatbench-ssh/id_ed25519 -o IdentitiesOnly=yes' clone git@github.com:yanwerneck/llm_local_inference_masters.git /workspace/llm_local_inference_masters
+</code></pre>
+<p>Na primeira conexão, confira a impressão digital apresentada com a <a href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints">lista oficial do GitHub</a> antes de aceitar. Não desative a verificação do host.</p>
+<p>Para que os próximos pulls usem a mesma chave:</p>
+<pre><code class="language-bash">cd /workspace/llm_local_inference_masters
+git config core.sshCommand 'ssh -i /workspace/chatbench-ssh/id_ed25519 -o IdentitiesOnly=yes'
+</code></pre>
+<p>Isso modifica apenas a configuração desse repositório. Se a chave tiver senha, o SSH poderá solicitá-la. Quando terminar de usar o pod, revogue a deploy key no GitHub. Um volume persistente também pode reter a chave privada: trate-o como sensível.</p>
+<h2 id="5-publicar-o-projeto-a-partir-do-seu-mac">5. Publicar o projeto a partir do seu Mac</h2>
+<p>O repositório remoto deste projeto já foi criado e é <strong>público</strong>. Os comandos abaixo servem para conferir a publicação e enviar mudanças futuras. Não crie outro repositório com o mesmo propósito nem publique resultados/chaves inadvertidamente. Para projetos diferentes, considere começar com um repositório privado.</p>
+<p>No terminal do Mac:</p>
+<pre><code class="language-bash">cd /CAMINHO/LOCAL/chatbot-runtime-bench
+git status
+git log -1 --oneline
+git remote -v
+</code></pre>
+<p>Substitua <code>/CAMINHO/LOCAL</code> pela localização do projeto no seu computador. Confira quais arquivos serão publicados. <code>results/</code>, <code>tokenizer/</code>, <code>.venv/</code> e arquivos de credenciais são ignorados; <code>.gitignore</code> não substitui revisão manual. Se já existe um commit inicial, não é necessário criá-lo novamente.</p>
+<p>Se ainda não houver commit, configure sua identidade <strong>localmente</strong> e comite somente os arquivos do projeto:</p>
+<pre><code class="language-bash">git config user.name 'Seu Nome'
+git config user.email 'SEU_EMAIL_OU_NOREPLY_DO_GITHUB'
+git add README.md bench.py lifecycle.py requirements.txt .gitignore configs docs tests scripts
+git diff --cached --stat
+git commit -m 'Initial single-user chatbot benchmark'
+</code></pre>
+<p>Nome/e-mail são autoria dos commits, não credenciais de login. Use o endereço noreply da sua conta se preferir privacidade.</p>
+<p>Se ainda não há <code>origin</code>, associe o repositório criado:</p>
+<pre><code class="language-bash">git remote add origin git@github.com:yanwerneck/llm_local_inference_masters.git
+git push -u origin main
+</code></pre>
+<p>Esse push exige que o SSH do <strong>Mac</strong> já esteja autenticado no GitHub. Se <code>origin</code> já existir, confira seu destino em vez de sobrescrevê-lo. Não use force push.</p>
+<h3 id="autoria-nao-e-autenticacao">Autoria não é autenticação</h3>
+<p>Para não publicar seu e-mail pessoal, use nas configurações locais do Git o endereço noreply mostrado em Settings → Emails da sua conta GitHub. Isso só afeta commits novos: um commit antigo pode continuar expondo a autoria anterior. Revise também o histórico que será enviado, não apenas os arquivos atuais. Não use <code>git push --all</code> se houver branches locais reservadas para histórico privado.</p>
+<h2 id="6-rodar-sem-github-por-enquanto">6. Rodar sem GitHub por enquanto</h2>
+<p>Transfira a pasta do projeto ou <code>chatbot-runtime-bench.zip</code> para <code>/workspace</code> pelo cliente SSH/SFTP que você usa para acessar o pod. Descompacte com a interface de arquivos ou <code>unzip</code> e siga o README. Não é necessário publicar o código para executar o benchmark.</p>
+<p>Depois, baixe <code>results/</code> de volta para o computador <strong>antes de encerrar o pod</strong>. Não coloque chaves ou resultados brutos em um repositório público por conveniência.</p><footer>HTML autônomo, sem telemetria ou dependências externas. Fontes e limitações no texto. Editável em Markdown; gere novamente com python scripts/build_docs.py.</footer></main></body></html>

@@ -1,0 +1,12 @@
+{
+  "runtime": "llama.cpp",
+  "base_url": "http://127.0.0.1:8080",
+  "model": "qwen14b-q8-gguf",
+  "tokenizer": "/workspace/models/Qwen2.5-14B-tokenizer",
+  "context_window": 16384,
+  "cache_policy": "enabled-recorded (llama-server KV slots; verify server.log)",
+  "runtime_version": "llama.cpp local; record commit in server.log",
+  "model_artifact": "Qwen2.5-14B-Instruct-Q8_0 GGUF; SHA-256 registrado pelo make verify-gguf",
+  "server_command": "llama-server -m /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --host 127.0.0.1 --port 8080 --ctx-size 16384 --n-gpu-layers 999 --parallel 1 --jinja",
+  "notes": "14B pode exceder a VRAM disponível; não substituir automaticamente pelo 7B."
+}

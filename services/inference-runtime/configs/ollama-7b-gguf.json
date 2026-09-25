@@ -1,0 +1,12 @@
+{
+  "runtime": "ollama",
+  "base_url": "http://127.0.0.1:11434",
+  "model": "qwen7b-q8-gguf",
+  "tokenizer": "/workspace/models/Qwen2.5-7B-Instruct-original",
+  "context_window": 16384,
+  "cache_policy": "enabled-recorded (Ollama model resident policy; verify server.log)",
+  "runtime_version": "Ollama local; record ollama version",
+  "model_artifact": "arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf; GGUF Q8_0 local; SHA-256 registrado pelo make verify-gguf",
+  "server_command": "ollama serve; modelo qwen7b-q8-gguf previamente criado a partir do GGUF local",
+  "notes": "Ollama precisa do modelo criado localmente antes do benchmark; nenhum pull ocorre durante a medição."
+}

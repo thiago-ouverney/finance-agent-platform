@@ -1,0 +1,12 @@
+{
+  "runtime": "vllm",
+  "base_url": "http://127.0.0.1:8000",
+  "model": "qwen14b-q8-gguf",
+  "tokenizer": "/workspace/models/Qwen2.5-14B-tokenizer",
+  "context_window": 16384,
+  "cache_policy": "enabled-recorded (verify in server.log)",
+  "runtime_version": "vLLM local; record version in server.log",
+  "model_artifact": "Qwen2.5-14B-Instruct-Q8_0 GGUF; SHA-256 registrado pelo make verify-gguf",
+  "server_command": "vllm serve /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf --load-format gguf --quantization gguf --tokenizer /workspace/models/Qwen2.5-14B-tokenizer --served-model-name qwen14b-q8-gguf --host 127.0.0.1 --port 8000 --max-model-len 16384 --max-num-seqs 1 --gpu-memory-utilization 0.95",
+  "notes": "14B GGUF pode falhar por OOM; preserve a falha como resultado experimental."
+}

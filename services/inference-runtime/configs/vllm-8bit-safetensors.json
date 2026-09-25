@@ -1,0 +1,12 @@
+{
+  "runtime": "vllm",
+  "base_url": "http://127.0.0.1:8000",
+  "model": "qwen14b-8bit-safetensors",
+  "tokenizer": "/workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit",
+  "context_window": 4096,
+  "cache_policy": "runtime-default-unverified",
+  "runtime_version": "PREENCHER",
+  "model_artifact": "arthuravianna/Qwen2.5-14B-Instruct-GGUF-8bit; safetensors quantizado em 8 bits; revision main",
+  "server_command": "vllm serve /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit --tokenizer /workspace/models/Qwen2.5-14B-Instruct-GGUF-8bit --served-model-name qwen14b-8bit-safetensors --host 127.0.0.1 --port 8000 --max-model-len 4096 --gpu-memory-utilization 0.95",
+  "notes": "Experimento separado do GGUF Q8_0. O repositório declara safetensors, qweight uint8 e quant_method gguf; preservar falhas de loader ou memória."
+}

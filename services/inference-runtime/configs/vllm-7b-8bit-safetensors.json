@@ -1,0 +1,12 @@
+{
+  "runtime": "vllm",
+  "base_url": "http://127.0.0.1:8000",
+  "model": "qwen7b-8bit-safetensors",
+  "tokenizer": "/workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit",
+  "context_window": 4096,
+  "cache_policy": "runtime-default-unverified",
+  "runtime_version": "PREENCHER",
+  "model_artifact": "arthuravianna/Qwen2.5-7B-Instruct-GGUF-8bit; formato e quantização a confirmar no config.json; revision main",
+  "server_command": "vllm serve /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit --tokenizer /workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit --served-model-name qwen7b-8bit-safetensors --host 127.0.0.1 --port 8000 --max-model-len 4096 --gpu-memory-utilization 0.95",
+  "notes": "Novo artefato, não combinar com resultados do Qwen2.5-14B. Verificar formato físico, quant_method, lm_head e compatibilidade do loader antes da bateria."
+}

@@ -1,0 +1,12 @@
+{
+  "runtime": "ollama",
+  "base_url": "http://127.0.0.1:11434",
+  "model": "SUBSTITUA_PELO_NOME_EM_OLLAMA_LIST",
+  "tokenizer": "/workspace/models/Qwen2.5-14B-tokenizer",
+  "context_window": 4096,
+  "cache_policy": "runtime-default-unverified",
+  "runtime_version": "PREENCHER",
+  "model_artifact": "PREENCHER: SHA do GGUF e quantização exata",
+  "server_command": "PREENCHER: configuração do serviço e Modelfile, SEM segredos",
+  "notes": "O tokenizer deve corresponder ao modelo. Contexto deve estar configurado no Ollama, não só neste arquivo."
+}

@@ -1,0 +1,12 @@
+{
+  "runtime": "ollama",
+  "base_url": "http://127.0.0.1:11434",
+  "model": "qwen14b-q8-gguf",
+  "tokenizer": "/workspace/models/Qwen2.5-14B-tokenizer",
+  "context_window": 16384,
+  "cache_policy": "enabled-recorded (Ollama model resident policy; verify server.log)",
+  "runtime_version": "Ollama local; record ollama version",
+  "model_artifact": "Qwen2.5-14B-Instruct-Q8_0 GGUF; SHA-256 registrado pelo make verify-gguf",
+  "server_command": "ollama serve; alias qwen14b-q8-gguf criado previamente a partir do GGUF local",
+  "notes": "14B pode falhar por memória; nenhum pull ou fallback é feito pelo benchmark."
+}

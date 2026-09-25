@@ -1,0 +1,12 @@
+{
+  "runtime": "vllm",
+  "base_url": "http://127.0.0.1:8000",
+  "model": "qwen14b-q8-gguf",
+  "tokenizer": "/workspace/models/Qwen2.5-14B-tokenizer",
+  "context_window": 4096,
+  "cache_policy": "runtime-default-unverified",
+  "runtime_version": "PREENCHER",
+  "model_artifact": "PREENCHER: arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf / SHA do arquivo",
+  "server_command": "PREENCHER: comando local GGUF; SEM senhas ou chaves",
+  "notes": "Modelo acadêmico fixado: GGUF Q8_0. Se falhar, preserve server.log e trate como incompatibilidade a investigar."
+}

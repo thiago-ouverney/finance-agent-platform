@@ -1,0 +1,32 @@
+{
+  "name": "qwen_chat_v1",
+  "version": 1,
+  "description": "Fixed Portuguese conversational workload for local LLM latency and KV-cache growth measurements.",
+  "system": "Voce e um assistente tecnico conciso. Responda em portugues, mantenha contexto entre turnos e nao invente dados experimentais.",
+  "turns": [
+    {
+      "user": "Explique em duas frases a diferenca entre RAM do sistema e VRAM da GPU em inferencia de modelos de linguagem.",
+      "assistant": "RAM guarda dados e processos do sistema, enquanto VRAM guarda pesos, ativacoes e buffers usados diretamente pela GPU. Na inferencia, falta de VRAM costuma limitar contexto, lote e modelo antes da RAM do sistema."
+    },
+    {
+      "user": "Agora relacione essa diferenca com o KV-cache durante uma conversa longa.",
+      "assistant": "O KV-cache cresce com os tokens mantidos no contexto e normalmente ocupa VRAM quando a inferencia roda na GPU. Em conversas longas, ele pode se tornar o principal consumidor adicional de memoria alem dos pesos."
+    },
+    {
+      "user": "Considere uma RTX 3090 de 24 GB e um modelo quantizado. Quais sinais indicam que o contexto esta perto do limite?",
+      "assistant": "Os sinais incluem aumento forte de ocupacao de KV, VRAM proxima do teto, falhas de alocacao e queda abrupta de throughput. Tambem observe reinicios do runtime ou recusas quando o servidor tenta reservar o contexto."
+    },
+    {
+      "user": "Proponha um protocolo curto para comparar vLLM, llama.cpp e Ollama sem misturar aquecimento com medicao.",
+      "assistant": "Inicie cada runtime separadamente, aguarde readiness, execute warmup descartavel e depois meca uma fase fixa. Registre versoes, argumentos, pesos, tokenizer, telemetria e falhas sem reutilizar estado entre runtimes."
+    },
+    {
+      "user": "Resuma os cuidados para que os resultados sejam reprodutiveis entre duas execucoes no mesmo pod.",
+      "assistant": "Use o mesmo modelo, tokenizer, fixture, argumentos de servidor e limites de contexto. Registre hashes, isole processos, evite downloads durante a medicao e mantenha a mesma politica de cache."
+    },
+    {
+      "user": "Se a ocupacao de KV cresce lentamente, quais parametros do benchmark voce ajustaria primeiro?",
+      "assistant": "Eu aumentaria o contexto alvo ou o numero de turnos antes de elevar concorrencia. Depois ajustaria requests e repeticoes para estabilizar percentis sem alterar a semantica do workload."
+    }
+  ]
+}

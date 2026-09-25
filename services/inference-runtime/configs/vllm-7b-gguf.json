@@ -1,0 +1,12 @@
+{
+  "runtime": "vllm",
+  "base_url": "http://127.0.0.1:8000",
+  "model": "qwen7b-q8-gguf",
+  "tokenizer": "/workspace/models/Qwen2.5-7B-Instruct-original",
+  "context_window": 16384,
+  "cache_policy": "enabled-recorded (vLLM default observed; verify in server.log)",
+  "runtime_version": "vLLM 0.29.0 + vllm-gguf-plugin (recorded from server.log)",
+  "model_artifact": "arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf; GGUF Q8_0 local; SHA-256 registrado pelo make verify-gguf",
+  "server_command": "vllm serve /workspace/models/Qwen2.5-7B-Instruct-Q8_0/Qwen2.5-7B-Instruct-Q8_0.gguf --load-format gguf --quantization gguf --tokenizer /workspace/models/Qwen2.5-7B-Instruct-original --served-model-name qwen7b-q8-gguf --host 127.0.0.1 --port 8000 --max-model-len 16384 --max-num-seqs 1 --gpu-memory-utilization 0.95",
+  "notes": "GGUF verdadeiro gerado pelo llama.cpp a partir do checkpoint original Qwen 7B; não misturar com resultados 14B ou safetensors."
+}

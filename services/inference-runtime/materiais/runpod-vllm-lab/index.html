@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>RunPod + vLLM · Laboratório do Yan</title>
+<style>
+:root{--ink:#20332f;--muted:#566960;--accent:#176650;--paper:#fcfbf7;--line:#dce3dc}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.75 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent);text-underline-offset:3px;overflow-wrap:anywhere}a:hover{color:#ad562e}a:focus-visible,button:focus-visible{outline:3px solid #ca794b;outline-offset:4px}.layout{max-width:1400px;margin:auto;display:grid;grid-template-columns:280px minmax(0,1fr);gap:54px;padding:40px}aside{position:sticky;top:28px;height:calc(100vh - 56px);overflow:auto;padding-right:20px;font-size:13px}aside .brand{font-size:17px;font-weight:750;letter-spacing:-.5px;margin-bottom:5px}aside .sub{color:var(--muted);margin-bottom:25px}.toc ul{list-style:none;padding:0}.toc li{margin:0 0 12px}.toc a{text-decoration:none;display:block;padding-left:12px;border-left:2px solid var(--line)}.toc a:hover{border-color:var(--accent)}main{max-width:910px;min-width:0}header{border-top:5px solid var(--accent);padding:22px 0 20px;display:flex;justify-content:space-between;gap:15px;align-items:center}.eyebrow{font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:750;color:var(--accent)}.badge{border:1px solid var(--line);border-radius:30px;padding:4px 12px;font-size:12px;color:var(--muted)}h1{font-size:clamp(32px,4.4vw,54px);line-height:1.12;letter-spacing:-2px;max-width:760px;margin:20px 0 24px}h2{font-size:28px;line-height:1.3;letter-spacing:-.8px;margin:66px 0 22px;border-top:1px solid var(--line);padding-top:28px}h3{font-size:21px;margin-top:32px}p{margin:0 0 20px}li{margin-bottom:9px}strong{font-weight:700}code{font: .86em/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;background:#edf0e9;border-radius:4px;padding:2px 5px}pre{background:#172c29;color:#ebf5ef;border-radius:12px;padding:24px;overflow:auto;line-height:1.65;margin:0}pre code{background:transparent;padding:0;color:inherit;overflow-wrap:normal;font-size:13px}.code-wrap{margin:24px 0;position:relative}.code-bar{background:#233e37;color:#b8d7c9;border-radius:12px 12px 0 0;padding:7px 14px;display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:1px}.code-bar+pre{border-radius:0 0 12px 12px}button{cursor:pointer;font:inherit;font-size:12px;background:transparent;border:1px solid #6a9384;color:#f0fff7;padding:4px 10px;border-radius:5px}button:hover{background:#37594d}.table-wrap{overflow-x:auto;margin:24px 0;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.6}th{text-align:left;background:#e9eee5;font-weight:700}td,th{padding:14px 16px;vertical-align:top;border-bottom:1px solid var(--line);min-width:170px}tr:last-child td{border-bottom:0}tr:nth-child(even){background:#f4f5ef}footer{margin:60px 0 20px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}.mobile-nav{display:none}.status{font-size:12px;color:var(--muted)}
+@media(max-width:1050px){.layout{gap:28px;padding:25px;grid-template-columns:220px minmax(0,1fr)}aside{font-size:12px}}
+@media(max-width:760px){.layout{display:block;padding:20px}aside{position:static;height:auto;padding:0}.toc{display:none}.mobile-nav{display:block;margin:15px 0 25px}.mobile-nav .toc{display:block}aside>.brand,aside>.sub{display:none}h1{letter-spacing:-1px}h2{font-size:25px;margin-top:45px}header{padding-top:16px}.badge{display:none}body{font-size:16px}pre{padding:16px}}
+@media print{aside,button,.code-bar,.mobile-nav{display:none!important}.layout{display:block;padding:0}main{max-width:none}body{font-size:11pt;background:white}h1{font-size:28pt}h2{font-size:18pt;margin-top:25pt}pre{white-space:pre-wrap;background:#f1f3ef;color:black;border:1px solid #ccc}pre code{font-size:9pt}a{color:inherit}table{font-size:9pt}header{border-top-width:2px}.table-wrap{overflow:visible}}
+</style>
+</head>
+<body>
+<div class="layout">
+<aside aria-label="Navegação do guia"><div class="brand">Laboratório do Yan</div><div class="sub">Inferência local de LLMs · UFF</div><div class="toc">
+<ul>
+<li><a href="#1-o-que-voce-vai-montar">1. O que você vai montar</a></li>
+<li><a href="#2-criar-o-pod">2. Criar o Pod</a></li>
+<li><a href="#3-instalar-o-ambiente">3. Instalar o ambiente</a></li>
+<li><a href="#4-carregar-o-modelo-e-deixar-o-servidor-ligado">4. Carregar o modelo e deixar o servidor ligado</a></li>
+<li><a href="#5-fazer-a-primeira-pergunta">5. Fazer a primeira pergunta</a></li>
+<li><a href="#6-entender-o-que-vale-mexer">6. Entender o que vale mexer</a></li>
+<li><a href="#7-saber-se-o-pod-esta-saudavel">7. Saber se o Pod está saudável</a></li>
+<li><a href="#8-medir-quando-voce-estiver-pronto">8. Medir quando você estiver pronto</a></li>
+<li><a href="#9-se-nao-funcionar">9. Se não funcionar</a></li>
+<li><a href="#10-encerrar-e-retomar-sem-sustos">10. Encerrar e retomar sem sustos</a></li>
+<li><a href="#11-ajustes-pequenos-no-plano-do-grupo">11. Ajustes pequenos no plano do grupo</a></li>
+<li><a href="#12-caderno-minimo-de-experimentos">12. Caderno mínimo de experimentos</a></li>
+</ul>
+</div>
+</aside>
+<main>
+<header><span class="eyebrow">RunPod × vLLM</span><span class="badge">RTX 3090 · Qwen 14B · GGUF Q8_0</span></header>
+<details class="mobile-nav"><summary>Ir para uma etapa</summary><nav aria-label="Etapas no celular"></nav></details>
+<article><h1 id="seu-primeiro-qwen-no-runpod-com-vllm">Seu primeiro Qwen no RunPod com vLLM</h1>
+<p><strong>Artefato único deste roteiro:</strong> <a href="https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf">Qwen2.5-14B-Instruct-Q8_0.gguf</a>. No vLLM CUDA, instale <code>vllm-gguf-plugin</code> e use o arquivo GGUF local com <code>--tokenizer</code> do Qwen2.5. A documentação do vLLM classifica GGUF como experimental; se o servidor não iniciar, preserve o erro, investigue o ambiente e marque a execução como falha. Não troque o artefato.</p>
+<p><strong>Como o benchmark mede o carregamento:</strong> use <code>--launch</code> com o servidor parado. O intervalo processo → <code>/v1/models</code> mede prontidão HTTP; processo → primeiro conteúdo da primeira geração é o indicador de carregamento efetivo, incluindo pesos locais, alocação e kernels. Sem <code>--launch</code>, o carregamento não é conhecido. Para llama.cpp use <code>llama-server -m ...</code>; para Ollama use <code>ollama serve</code> com preload local mantido em foreground; para vLLM use <code>vllm serve ...</code>. O download precisa ocorrer antes do processo.</p>
+<p>Guia do Yan · RTX 3090 / 24 GB · conferido em 16/09/2026.</p>
+<p><strong>Objetivo de hoje: receber uma resposta do modelo.</strong> Depois, observar a máquina e mudar uma coisa por vez. Não há uma configuração “vencedora” aqui: os limites iniciais só deixam o primeiro teste pequeno e previsível.</p>
+<p><strong>Para estudar os conceitos:</strong> abra o <a href="estudo.html">caderno interativo de inferência</a>. Ele explica RAM, VRAM, HBM, prefill/decode, Roofline, PCIe e KV cache, com simuladores e uma trilha de experimentos para este modelo no vLLM.</p>
+<p>Abra <code>index.html</code> para a versão de leitura com navegação e botões de copiar. Este Markdown contém o mesmo roteiro. Os comandos abaixo são para você executar; nenhum Pod foi criado e nenhuma inferência foi executada durante a elaboração do guia.</p>
+<p><strong>Atualização após o primeiro teste do Yan:</strong> a importação falhou com <code>libcudart.so.13</code>. O comando original não selecionava a variante CUDA do vLLM corretamente. Se você já chegou a esse erro, vá à <strong>seção 3.1</strong> antes de instalar qualquer coisa novamente. A correção no Pod ainda não foi validada; faltam as saídas de diagnóstico.</p>
+<h3 id="como-ler-os-comandos">Como ler os comandos</h3>
+<p>O prefixo <code>(.venv) root@...:/workspace/yan-vllm#</code> é o prompt do terminal: não o copie como parte do comando. <code>.venv</code> indica o ambiente Python ativo; <code>root</code> é o usuário; o caminho é a pasta atual. Uma barra <code>\</code> no fim da linha continua o mesmo comando na linha seguinte. Não acrescente espaços depois dela. As explicações ficam fora dos blocos para você poder copiá-los inteiros.</p>
+<h2 id="1-o-que-voce-vai-montar">1. O que você vai montar</h2>
+<p>Seu navegador abre um terminal Linux no RunPod. Nesse Linux, o vLLM carrega o modelo na GPU e oferece uma API HTTP. Um segundo terminal no mesmo Pod envia as perguntas. Seu Mac apenas controla a máquina remota.</p>
+<p>Modelo deste roteiro: <a href="https://huggingface.co/arthuravianna/Qwen2.5-14B-Instruct-Q8_0.gguf">Qwen2.5-14B-Instruct-Q8_0.gguf</a>. Registre o SHA-256 do arquivo, tokenizer e template de chat. Essa inspeção prepara o comando; o carregamento no Pod ainda precisa ser confirmado.</p>
+<p>Este roteiro começa do zero com o artefato GGUF acima. Se já houver um servidor na porta 8000, encerre-o antes de iniciar o experimento. Um erro como <code>libcudart.so.13</code> deve ser registrado e investigado na seção 3.1; ele não deve ser mascarado por outra instalação ou modelo.</p>
+<p>“8 bits” descreve os pesos quantizados. Ativações, alguns tensores e KV cache ainda ocupam memória em outra precisão. O parâmetro <code>--dtype half</code> que usaremos não transforma esses pesos em um modelo FP16 completo.</p>
+<p>O 14B em FP16 precisa de aproximadamente 29,4 GB decimais só para 14,7 bilhões de parâmetros a 2 bytes. Portanto, não cabe integralmente na 3090 de 24 GB. O GGUF Q8_0 pode exigir mais memória que a disponível conforme contexto e buffers; se não carregar, registre OOM e não reduza a comparabilidade trocando de artefato.</p>
+<h2 id="2-criar-o-pod">2. Criar o Pod</h2>
+<p><strong>No navegador, no RunPod:</strong></p>
+<ol>
+<li>Crie sua conta, adicione crédito e abra <strong>Pods → Deploy</strong>. Anote a tarifa exibida antes de iniciar.</li>
+<li>Escolha <strong>1 × RTX 3090, 24 GB</strong>. Para aprender, prefira <strong>On-Demand</strong>; uma instância interrompível pode parar sua sessão.</li>
+<li>Use um template oficial <strong>RunPod PyTorch</strong>, com Ubuntu recente e Python. Vamos instalar o vLLM num ambiente separado dentro dele.</li>
+<li>Nos filtros, procure um host compatível com <strong>CUDA 12.9 ou superior</strong>, para seguir a instalação deste guia. A GPU ser 3090, por si só, não informa a versão do driver do host.</li>
+<li>Sugestão de capacidade para este laboratório: <strong>32 GB ou mais de RAM</strong>, idealmente 4 ou mais vCPUs, <strong>30 GB de container disk</strong> e <strong>100 GB de volume disk</strong>, montado em <code>/workspace</code>. São margens práticas para instalação, cache e logs, não mínimos oficiais.</li>
+<li>Dê um nome como <code>yan-vllm-3090</code>, revise GPU, armazenamento e custo, e faça o deploy.</li>
+<li>Quando estiver pronto, entre em <strong>Connect → Web Terminal</strong>; habilite o terminal se a interface pedir. Alternativamente, use o terminal do JupyterLab do template.</li>
+</ol>
+<p>Os nomes exatos dos botões podem mudar. Consulte <a href="https://docs.runpod.io/pods/manage-pods">deploy e gerenciamento</a> e <a href="https://docs.runpod.io/pods/connect-to-a-pod">opções de conexão</a>. Nesta primeira sessão, não é necessário expor a porta 8000 à internet.</p>
+<p><strong>Ponto de conferência:</strong> você deve estar num terminal Linux remoto, não no terminal local do Mac. Execute:</p>
+<pre><code class="language-bash">uname -m
+nvidia-smi
+python3 --version
+df -h /workspace /
+free -h
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>O que faz e por que usamos</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>uname -m</code></td>
+<td>Mostra a arquitetura da máquina. <code>x86_64</code> corresponde ao pacote binário usado neste roteiro.</td>
+</tr>
+<tr>
+<td><code>nvidia-smi</code></td>
+<td>Consulta o driver NVIDIA: GPU, driver, memória, temperatura e processos visíveis. Não instala nem modifica nada.</td>
+</tr>
+<tr>
+<td><code>python3 --version</code></td>
+<td>Mostra a versão do Python que criará o ambiente virtual.</td>
+</tr>
+<tr>
+<td><code>df -h /workspace /</code></td>
+<td>Mostra espaço total, ocupado e livre nos sistemas de arquivos desses caminhos. <code>-h</code> usa unidades legíveis. Volume e container podem ter limites diferentes.</td>
+</tr>
+<tr>
+<td><code>free -h</code></td>
+<td>Mostra RAM e swap visíveis. Observe especialmente <code>available</code>; RAM é diferente da VRAM mostrada pelo NVIDIA.</td>
+</tr>
+</tbody>
+</table>
+<p>Espere <code>x86_64</code>, uma RTX 3090 e aproximadamente 24 GB de VRAM. A linha “CUDA Version” do <code>nvidia-smi</code> indica a versão máxima suportada pelo driver, não o toolkit instalado. Se estiver abaixo de 12.9, pare aqui e traga essa saída: ajustaremos a combinação de wheel/driver. Não tente instalar um driver NVIDIA dentro do Pod.</p>
+<h2 id="3-instalar-o-ambiente">3. Instalar o ambiente</h2>
+<p><strong>Terminal A, dentro do Pod.</strong> Copie um bloco por vez e só avance se ele terminar sem erro.</p>
+<h3 id="31-se-apareceu-libcudartso13-diagnosticar-primeiro">3.1. Se apareceu <code>libcudart.so.13</code>: diagnosticar primeiro</h3>
+<p>O traceback enviado pelo Yan termina ao importar uma extensão binária do vLLM. Ela procura <code>libcudart.so.13</code>, uma biblioteca do runtime CUDA 13, que o carregador não encontrou. Isso acontece antes de carregar o Qwen e não tem relação com tamanho do prompt ou falta de VRAM do modelo.</p>
+<p><strong>Correção do guia:</strong> o pacote padrão do vLLM 0.29.0 no PyPI usa CUDA 13.0, conforme a <a href="https://github.com/vllm-project/vllm/releases/tag/v0.29.0">release oficial</a>. Acrescentar um índice de PyTorch <code>cu129</code> não seleciona automaticamente um vLLM compilado para CUDA 12.9. A instrução anterior podia combinar variantes incompatíveis.</p>
+<p>Execute estes comandos no ambiente que apresentou o erro e envie suas saídas antes de tentar recuperá-lo:</p>
+<pre><code class="language-bash">nvidia-smi
+python -m pip list | grep -Ei 'vllm|torch|nvidia|cuda'
+python -c 'import torch; print(&quot;PyTorch:&quot;, torch.__version__); print(&quot;CUDA do PyTorch:&quot;, torch.version.cuda); print(&quot;GPU disponível:&quot;, torch.cuda.is_available())'
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Comando ou trecho</th>
+<th>O que revela</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nvidia-smi</code></td>
+<td>Qual GPU e driver o Pod recebeu, independentemente de conseguir importar o vLLM.</td>
+</tr>
+<tr>
+<td><code>python -m pip list</code></td>
+<td>Lista nomes e versões dos pacotes do Python ativo. <code>python -m pip</code> evita chamar por engano o pip de outro ambiente.</td>
+</tr>
+<tr>
+<td><code>\| grep -Ei 'vllm\|torch\|nvidia\|cuda'</code></td>
+<td>O pipe envia a lista ao filtro. <code>-E</code> permite alternativas separadas por barras verticais; <code>-i</code> ignora maiúsculas. Mostra apenas as dependências relevantes.</td>
+</tr>
+<tr>
+<td><code>python -c '...'</code></td>
+<td>Executa um pequeno programa Python escrito entre aspas, sem criar arquivo.</td>
+</tr>
+<tr>
+<td><code>import torch</code></td>
+<td>Testa se o PyTorch sozinho carrega. Não importa o vLLM, que já sabemos que falhou.</td>
+</tr>
+<tr>
+<td><code>torch.__version__</code></td>
+<td>Informa a versão instalada do PyTorch.</td>
+</tr>
+<tr>
+<td><code>torch.version.cuda</code></td>
+<td>Informa a versão CUDA associada à compilação do PyTorch, não a versão máxima do driver.</td>
+</tr>
+<tr>
+<td><code>torch.cuda.is_available()</code></td>
+<td>Testa se o PyTorch consegue disponibilizar CUDA; esperamos <code>True</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Se o PyTorch funcionar mas o vLLM falhar, isso restringe a investigação à combinação de pacotes/extensões e à busca de bibliotecas. Não prova sozinho qual pacote precisa ser substituído. O erro também não prova que o driver é antigo. Não crie um link de <code>libcudart.so.13</code> para <code>libcudart.so.12</code>: nomes diferentes podem representar interfaces binárias incompatíveis.</p>
+<p><strong>Estado atual:</strong> diagnóstico pendente. Os comandos seguintes descrevem uma instalação nova, não uma ordem para reinstalar por cima do ambiente com erro.</p>
+<h3 id="32-preparar-um-ambiente-novo">3.2. Preparar um ambiente novo</h3>
+<pre><code class="language-bash">mkdir -p /workspace/yan-vllm/logs /workspace/yan-vllm/resultados
+cd /workspace/yan-vllm
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Explicação</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mkdir -p .../logs .../resultados</code></td>
+<td>Cria as pastas e os diretórios intermediários. <code>-p</code> aceita pastas que já existam.</td>
+</tr>
+<tr>
+<td><code>cd /workspace/yan-vllm</code></td>
+<td>Define a pasta de trabalho; caminhos relativos como <code>.venv</code> passam a partir dela.</td>
+</tr>
+<tr>
+<td><code>python3 -m venv .venv</code></td>
+<td>Cria um ambiente Python isolado. Não isola o driver da GPU nem cria outra máquina. Use numa instalação nova; não conserta automaticamente um ambiente existente.</td>
+</tr>
+<tr>
+<td><code>source .venv/bin/activate</code></td>
+<td>Ajusta o terminal atual para usar o Python e os executáveis desse ambiente. Cada terminal novo precisa ser ativado separadamente.</td>
+</tr>
+<tr>
+<td><code>python -m pip install --upgrade pip</code></td>
+<td>Atualiza o instalador de pacotes dentro do ambiente ativo. Não atualiza o driver NVIDIA.</td>
+</tr>
+</tbody>
+</table>
+<p>Use Python 3.10–3.13 neste roteiro, preferencialmente 3.12. Se <code>venv</code> estiver ausente num template Ubuntu, execute <code>apt-get update</code> e <code>apt-get install -y python3-venv</code> como root, e repita a criação. Se o template tiver Python fora dessa faixa, escolha um template adequado antes de continuar.</p>
+<p><code>apt-get update</code> atualiza o catálogo de pacotes do Ubuntu; não atualiza todos os programas. <code>apt-get install -y python3-venv</code> instala o suporte a ambientes virtuais e aceita automaticamente as confirmações do instalador. Esses comandos alteram o container, não apenas a <code>.venv</code>.</p>
+<h3 id="33-instalar-a-variante-cuda-explicitamente">3.3. Instalar a variante CUDA explicitamente</h3>
+<p>Para uma instalação nova em Linux <code>x86_64</code>, com driver compatível com CUDA 12.9, use o arquivo <strong><code>+cu129</code></strong> publicado na release. Um wheel é um pacote Python pré-compilado; aqui ele contém código nativo dependente de CUDA.</p>
+<pre><code class="language-bash">export HF_HOME=/workspace/yan-vllm/hf-cache
+export PIP_CACHE_DIR=/workspace/yan-vllm/pip-cache
+python -m pip install \
+  'https://github.com/vllm-project/vllm/releases/download/v0.29.0/vllm-0.29.0%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl' \
+  --extra-index-url https://download.pytorch.org/whl/cu129
+python -m pip check
+</code></pre>
+<p>A URL fixa a versão e a variante do <strong>vLLM</strong>, ao contrário do comando anterior. <code>%2B</code> é a representação de <code>+</code> na URL. O índice adicional oferece dependências PyTorch CUDA 12.9, mas não é um seletor universal de variante: confira o resultado antes de avançar. Deixe o instalador resolver as dependências declaradas pelo wheel, sem atualizar PyTorch separadamente. Fonte do arquivo: <a href="https://github.com/vllm-project/vllm/releases/tag/v0.29.0">artefatos da release 0.29.0</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Explicação</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>export HF_HOME=...</code></td>
+<td>Direciona o cache do Hugging Face para o volume em <code>/workspace</code>; ajuda a preservar os modelos entre sessões. Vale para este terminal e seus processos filhos.</td>
+</tr>
+<tr>
+<td><code>export PIP_CACHE_DIR=...</code></td>
+<td>Direciona o cache de downloads do pip para o volume. Não muda onde o pacote é instalado: continua na <code>.venv</code>.</td>
+</tr>
+<tr>
+<td><code>python -m pip install URL ...</code></td>
+<td>Baixa e instala o wheel escolhido e suas dependências. Esta operação altera o ambiente e consome disco/rede.</td>
+</tr>
+<tr>
+<td><code>--extra-index-url .../cu129</code></td>
+<td>Acrescenta uma fonte de pacotes ao índice padrão; não obriga todos os pacotes a vir dela.</td>
+</tr>
+<tr>
+<td><code>python -m pip check</code></td>
+<td>Verifica requisitos de versões declarados pelos pacotes. Não testa carregamento de bibliotecas CUDA; pode passar mesmo com o erro relatado.</td>
+</tr>
+</tbody>
+</table>
+<p>Confira que o ambiente enxerga a GPU:</p>
+<pre><code class="language-bash">python -c 'import torch, vllm; print(&quot;vLLM:&quot;, vllm.__version__); print(&quot;PyTorch:&quot;, torch.__version__); print(&quot;CUDA do PyTorch:&quot;, torch.version.cuda); print(&quot;GPU disponível:&quot;, torch.cuda.is_available()); print(&quot;GPU:&quot;, torch.cuda.get_device_name(0))'
+python -m pip freeze &gt; resultados/pacotes.txt
+nvidia-smi &gt; resultados/gpu-inicial.txt
+vllm serve --help &gt; resultados/serve-help.txt
+</code></pre>
+<p><strong>Ponto de conferência:</strong> GPU disponível deve ser <code>True</code>, com a 3090 identificada. Um erro aqui é de ambiente; ainda não é hora de mexer em parâmetros do modelo.</p>
+<p>O programa de conferência importa PyTorch e vLLM e imprime suas versões; <code>torch.cuda.get_device_name(0)</code> consulta a primeira GPU, cujo índice é zero. Se <code>import vllm</code> falhar, o Python interrompe o programa antes dos <code>print</code>: por isso o diagnóstico da seção 3.1 testa apenas PyTorch.</p>
+<p>Os três comandos seguintes guardam evidências: <code>pip freeze</code> salva os pacotes e versões; <code>nvidia-smi</code> salva o estado da GPU; <code>vllm serve --help</code> salva a ajuda da versão instalada. <strong><code>&gt;</code> redireciona a saída normal e cria ou sobrescreve o arquivo.</strong> Erros continuam no terminal. Se <code>vllm serve --help &gt; ...</code> falhar, o arquivo pode ficar vazio — exatamente por isso a ausência de texto nele não comprova sucesso.</p>
+<h2 id="4-carregar-o-modelo-e-deixar-o-servidor-ligado">4. Carregar o modelo e deixar o servidor ligado</h2>
+<p>Ainda no <strong>Terminal A</strong>, execute:</p>
+<pre><code class="language-bash">cd /workspace/yan-vllm
+source .venv/bin/activate
+export HF_HOME=/workspace/yan-vllm/hf-cache
+set -o pipefail
+vllm serve /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf \
+  --served-model-name qwen14b-int8 \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --dtype half \
+  --max-model-len 2048 \
+  --max-num-seqs 1 \
+  2&gt;&amp;1 | tee &quot;logs/arthur-$(date +%Y%m%d-%H%M%S).log&quot;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Trecho</th>
+<th>O que faz</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cd</code>, <code>source</code>, <code>export HF_HOME</code></td>
+<td>Retomam a pasta, o ambiente Python e o cache; são os mesmos preparativos explicados na seção 3.</td>
+</tr>
+<tr>
+<td><code>set -o pipefail</code></td>
+<td>Faz a sequência com pipe sinalizar falha se o servidor falhar, mesmo que <code>tee</code> consiga gravar o log. Não reinicia o servidor automaticamente.</td>
+</tr>
+<tr>
+<td><code>vllm serve /workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf</code></td>
+<td>Inicia o servidor usando o arquivo GGUF local.</td>
+</tr>
+<tr>
+<td><code>--served-model-name qwen14b-int8</code></td>
+<td>Define o nome curto que o cliente deve enviar na API. Não altera o modelo.</td>
+</tr>
+<tr>
+<td><code>--host 127.0.0.1 --port 8000</code></td>
+<td>Escuta na porta 8000 apenas na interface local do Pod.</td>
+</tr>
+<tr>
+<td><code>--dtype half</code></td>
+<td>Seleciona a precisão de cálculo aplicável ao backend; confirme o valor aceito para GGUF na versão instalada.</td>
+</tr>
+<tr>
+<td><code>--max-model-len 2048</code></td>
+<td>Limita o contexto total por sequência, somando entrada e saída.</td>
+</tr>
+<tr>
+<td><code>--max-num-seqs 1</code></td>
+<td>Permite uma sequência em execução por vez no agendador.</td>
+</tr>
+<tr>
+<td><code>2&gt;&amp;1</code></td>
+<td>Encaminha a saída de erros para a mesma saída dos logs normais.</td>
+</tr>
+<tr>
+<td><code>tee "logs/..."</code></td>
+<td>Mostra a saída no terminal e simultaneamente grava uma cópia em arquivo.</td>
+</tr>
+<tr>
+<td><code>$(date +%Y%m%d-%H%M%S)</code></td>
+<td>Executa <code>date</code> e insere ano, mês, dia, hora, minuto e segundo no nome do log.</td>
+</tr>
+</tbody>
+</table>
+<p>O primeiro início baixa muitos gigabytes, carrega pesos e prepara kernels. Isso pode levar vários minutos. O repositório é público; normalmente não precisa de token do Hugging Face. Download e inicialização não são o TTFT de uma requisição com o servidor aquecido.</p>
+<p>O vLLM lê os metadados do GGUF conforme o plugin/backend instalado; não force um quantizador diferente. Observe no log o backend realmente escolhido.</p>
+<p>Os dois limites explícitos são uma escolha didática: contexto total de <strong>2048 tokens</strong>, contando entrada e saída, e <strong>uma sequência em execução</strong>. As demais decisões de execução ficam nos padrões da versão. Esses padrões já incluem mecanismos de desempenho do próprio vLLM; este é um ponto de partida, não um motor sem otimizações internas.</p>
+<p>Deixe o Terminal A aberto. Quando o log indicar que a aplicação iniciou, siga para o teste. Detalhes dos argumentos: <a href="https://docs.vllm.ai/en/v0.29.0/cli/serve/">vLLM serve</a>.</p>
+<h2 id="5-fazer-a-primeira-pergunta">5. Fazer a primeira pergunta</h2>
+<p><strong>Prefere conversar pelo navegador?</strong> Depois de iniciar o servidor, siga o <a href="chat.html">guia do chat em Python</a>. A interface tem histórico, respostas em streaming e formatação de texto. Os arquivos <code>chat.py</code> e <code>requirements-chat.txt</code> estão nesta pasta; o vLLM continua rodando como descrito acima.</p>
+<p>Abra um <strong>Terminal B no mesmo Pod</strong>. Pode ser outro terminal no JupyterLab ou outra conexão. <code>127.0.0.1</code> abaixo aponta para o Pod, não para seu Mac.</p>
+<pre><code class="language-bash">curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/v1/models
+</code></pre>
+<p>O primeiro comando pode responder sem texto e ainda estar correto; o segundo deve listar <code>qwen14b-int8</code>.</p>
+<p><code>curl</code> faz uma requisição HTTP. <code>-f</code> retorna falha para respostas HTTP de erro; <code>-s</code> remove a barra de progresso; <code>-S</code> mantém as mensagens de erro mesmo com <code>-s</code>. <code>/health</code> consulta a saúde do processo; <code>/v1/models</code> consulta os nomes de modelos disponíveis. São consultas, sem geração de texto.</p>
+<pre><code class="language-bash">curl -fN http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    &quot;model&quot;: &quot;qwen14b-int8&quot;,
+    &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Explique em português, em três frases, o que é o KV cache de um LLM.&quot;}],
+    &quot;max_tokens&quot;: 128,
+    &quot;temperature&quot;: 0,
+    &quot;stream&quot;: true
+  }'
+</code></pre>
+<p>Aqui, <code>-N</code> desativa o buffer de saída do curl para mostrar o streaming conforme chega. <code>-H</code> informa que o conteúdo enviado é JSON. <code>-d</code> envia esse conteúdo e faz o curl usar POST. <code>model</code> escolhe o alias; <code>messages</code> contém a conversa; <code>role: user</code> identifica sua fala; <code>content</code> é a pergunta. <code>max_tokens</code> limita a saída, <code>temperature: 0</code> pede seleção gulosa e <code>stream: true</code> solicita entrega progressiva. As aspas simples externas protegem o JSON da interpretação pelo shell.</p>
+<p>Você verá eventos <code>data:</code> com pedaços da resposta. Esse é o formato de streaming da API, não um erro. <strong>Se apareceu texto coerente, a meta da primeira sessão foi atingida.</strong> Não precisa rodar o restante hoje.</p>
+<p>Para uma resposta em JSON único, troque <code>"stream": true</code> por <code>false</code>. O campo <code>usage</code> ajuda a ver os tokens de entrada e saída. <code>max_tokens</code> é um teto: o modelo pode encerrar antes.</p>
+<h2 id="6-entender-o-que-vale-mexer">6. Entender o que vale mexer</h2>
+<p>Existem dois grupos: parâmetros da <strong>requisição</strong>, que você muda no JSON, e parâmetros do <strong>servidor</strong>, que exigem parar e iniciar o vLLM novamente. Não são hiperparâmetros de treinamento.</p>
+<h3 id="primeiro-a-carga-de-trabalho">Primeiro: a carga de trabalho</h3>
+<table>
+<thead>
+<tr>
+<th>Experimento</th>
+<th>Como começar</th>
+<th>O que observar</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tamanho do prompt</td>
+<td>Mesma pergunta com contexto curto, médio e longo</td>
+<td>Quanto a espera inicial cresce com a entrada?</td>
+</tr>
+<tr>
+<td><code>max_tokens</code></td>
+<td>64 → 128 → 256</td>
+<td>Tempo total e quantidade realmente gerada; não confundir mais texto com servidor mais lento</td>
+</tr>
+<tr>
+<td><code>temperature</code></td>
+<td>0 para observar desempenho; depois 0.7 para explorar respostas</td>
+<td>Variação de conteúdo; não é a principal alavanca de velocidade</td>
+</tr>
+<tr>
+<td><code>top_p</code></td>
+<td>Deixe como está inicialmente</td>
+<td>Só explore junto da amostragem, depois de entender <code>temperature</code></td>
+</tr>
+</tbody>
+</table>
+<p>Intuição: <strong>prefill</strong> lê o prompt; <strong>decode</strong> gera a continuação. Entrada maior tende a pesar na espera inicial. Saída maior mantém o servidor trabalhando por mais tempo. Compare comprimentos em tokens, não em palavras.</p>
+<h3 id="depois-os-poucos-controles-do-servidor-que-merecem-atencao">Depois: os poucos controles do servidor que merecem atenção</h3>
+<table>
+<thead>
+<tr>
+<th>Parâmetro</th>
+<th>Intuição</th>
+<th>Experimento futuro</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--max-model-len</code></td>
+<td>Limite de entrada + saída por sequência; não é o comprimento real de toda pergunta</td>
+<td>2048 → 4096, se precisar de contexto e houver memória</td>
+</tr>
+<tr>
+<td><code>--gpu-memory-utilization</code></td>
+<td>Orçamento de VRAM do motor; não é porcentagem de uso computacional da GPU</td>
+<td>Consulte o padrão no help; mais tarde compare 0.85 e 0.90</td>
+</tr>
+<tr>
+<td><code>--max-num-seqs</code></td>
+<td>Quantas sequências podem ser processadas simultaneamente</td>
+<td>1 → 2 → 4, enviando de fato requisições concorrentes</td>
+</tr>
+<tr>
+<td><code>--max-num-batched-tokens</code></td>
+<td>Orçamento de tokens processados numa iteração; afeta o equilíbrio entre prefill e decode</td>
+<td>Deixe no padrão até investigar latência com concorrência</td>
+</tr>
+<tr>
+<td><code>--enable-prefix-caching</code> / <code>--no-enable-prefix-caching</code></td>
+<td>Permite reutilizar trabalho de um prefixo já processado</td>
+<td>Compare ligado/desligado com um prefixo longo idêntico</td>
+</tr>
+<tr>
+<td><code>--enforce-eager</code></td>
+<td>Caminho de execução sem CUDA graphs; útil para diagnóstico</td>
+<td>Experimento isolado se a preparação dos graphs falhar ou consumir muita memória</td>
+</tr>
+</tbody>
+</table>
+<p>Essas sugestões são hipóteses para explorar, não promessas de ganho. Aumentar memória disponível pode permitir mais cache sem acelerar uma pergunta curta. Aumentar sequências sem enviar mais perguntas não cria carga. Diminuir contexto máximo não garante redução proporcional da VRAM reservada: o motor pode usar a folga para o KV cache.</p>
+<p>Deixe <code>tensor-parallel-size</code>, offload para CPU, precisão do KV cache, kernels de atenção e quantizadores alternativos para depois. Com uma GPU e uma pergunta, eles adicionam variáveis antes de você conhecer a referência. Documentação de apoio: <a href="https://docs.vllm.ai/en/v0.29.0/configuration/engine_args/">configuração do motor</a> e <a href="https://docs.vllm.ai/en/v0.29.0/features/automatic_prefix_caching/">prefix caching</a>.</p>
+<p><strong>Para mudar um argumento:</strong> pressione Ctrl+C no Terminal A, espere o processo encerrar, confira <code>nvidia-smi</code> e execute novamente o comando completo com uma alteração. A primeira resposta após cada reinício pode ter custos extras. Registre o comando usado.</p>
+<h2 id="7-saber-se-o-pod-esta-saudavel">7. Saber se o Pod está saudável</h2>
+<p>No Terminal B, antes ou durante perguntas:</p>
+<pre><code class="language-bash">nvidia-smi
+free -h
+df -h /workspace /
+df -h /dev/shm
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8000/health
+</code></pre>
+<p>Os três primeiros comandos repetem as consultas de GPU, RAM e disco. <code>df -h /dev/shm</code> consulta o espaço do filesystem de memória compartilhada, usado por processos que precisam trocar dados. No último comando, <code>-o /dev/null</code> descarta o corpo da resposta e <code>-w</code> imprime apenas o código HTTP; <code>\n</code> acrescenta uma quebra de linha. <code>200</code> indica sucesso HTTP; <code>000</code> geralmente significa que nenhuma resposta HTTP foi recebida. Aqui não usamos <code>-f</code>: o objetivo é enxergar o código inclusive em erros HTTP.</p>
+<p>Para observar continuamente, use um comando por vez; Ctrl+C encerra o monitor:</p>
+<pre><code class="language-bash">watch -n 1 nvidia-smi
+</code></pre>
+<pre><code class="language-bash">vmstat 1
+</code></pre>
+<pre><code class="language-bash">top
+</code></pre>
+<p><code>watch -n 1 nvidia-smi</code> repete a consulta NVIDIA a cada segundo. <code>vmstat 1</code> imprime estatísticas de processos, memória, swap, I/O e CPU a cada segundo. <code>top</code> mostra processos e seu consumo atualizado; pressione <code>q</code> para sair. São monitores de observação: não mudam parâmetros do vLLM.</p>
+<p>Se <code>watch</code> ou <code>vmstat</code> não existirem no template Ubuntu, instale <code>procps</code> com <code>apt-get install -y procps</code> como root. A primeira linha de dados de <code>vmstat</code> é uma média desde o boot; observe as seguintes.</p>
+<p><code>apt-get install -y procps</code> instala as ferramentas de monitoramento do sistema; só é necessário quando estiverem ausentes.</p>
+<table>
+<thead>
+<tr>
+<th>Sinal</th>
+<th>Leitura útil</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VRAM ocupada, GPU quase ociosa sem perguntas</td>
+<td>Pode ser normal: o servidor mantém pesos e reserva cache</td>
+</tr>
+<tr>
+<td>GPU ocupada durante a geração</td>
+<td>Indica atividade, mas não prova uso eficiente nem distingue compute-bound de memory-bound</td>
+</tr>
+<tr>
+<td>RAM com pouco <code>available</code></td>
+<td>Investigue pressão de memória; <code>free</code> baixo sozinho pode ser cache do Linux</td>
+</tr>
+<tr>
+<td><code>si</code>/<code>so</code> recorrentes em <code>vmstat</code></td>
+<td>Há atividade de swap visível; correlacione com a lentidão</td>
+</tr>
+<tr>
+<td>CPU alta e GPU esperando</td>
+<td>Hipótese de gargalo fora da GPU; verifique processos e carga do host</td>
+</tr>
+<tr>
+<td>Disco quase cheio</td>
+<td>Pode interromper download, instalação ou gravação de logs</td>
+</tr>
+<tr>
+<td><code>/health</code> retorna 200, mas pergunta falha</td>
+<td>O processo responde; ainda é preciso validar uma inferência real</td>
+</tr>
+<tr>
+<td>Queda de clock/potência acompanhando temperatura e lentidão</td>
+<td>Investigue limitação térmica ou energética, sem concluir só pela temperatura</td>
+</tr>
+<tr>
+<td>Logs com OOM, preempções ou erros repetidos</td>
+<td>Salve o trecho e o comando; são pistas melhores que apenas “está lento”</td>
+</tr>
+</tbody>
+</table>
+<p>Num container, algumas leituras de RAM, CPU e swap podem refletir o host. Compare com os recursos contratados. Em sistemas com cgroup v2, estes arquivos ajudam a enxergar limites do container:</p>
+<pre><code class="language-bash">for f in memory.current memory.max memory.events cpu.max; do
+  if [ -r &quot;/sys/fs/cgroup/$f&quot; ]; then
+    printf '\n%s\n' &quot;$f&quot;
+    cat &quot;/sys/fs/cgroup/$f&quot;
+  fi
+done
+</code></pre>
+<p>O <code>for</code> percorre quatro nomes de arquivos. <code>f</code> guarda o nome atual; <code>[ -r ... ]</code> testa se o arquivo é legível. <code>printf</code> imprime seu nome e <code>cat</code> mostra o conteúdo. <code>fi</code> fecha o teste e <code>done</code> fecha a repetição. É uma leitura, sem modificar os limites. <code>memory.current</code> mostra uso em bytes, <code>memory.max</code> mostra o limite (ou <code>max</code>), <code>memory.events</code> mostra contadores de eventos e <code>cpu.max</code> mostra quota/período de CPU (ou quota <code>max</code>).</p>
+<p>Em <code>memory.events</code>, aumento de <code>oom_kill</code> é evidência de processo morto pelo limite de memória do container. Ausência desses arquivos não significa ausência de limite. Referência: <a href="https://docs.kernel.org/admin-guide/cgroup-v2.html">cgroup v2, documentação do kernel</a>.</p>
+<p><strong>Uma rotina suficiente no começo:</strong> olhar GPU, RAM e disco antes de carregar; observar GPU e logs durante uma pergunta; confirmar que a resposta termina sem erro. Não precisa montar Grafana para começar.</p>
+<h2 id="8-medir-quando-voce-estiver-pronto">8. Medir quando você estiver pronto</h2>
+<p>Comece só guardando o prompt, o comando de inicialização e os tokens retornados. Quando quiser números, rode o cliente de medição <strong>dentro do Pod</strong>: assim, a conexão Brasil–datacenter não entra na comparação local.</p>
+<p>TTFT é a espera até o primeiro token de conteúdo, não até os cabeçalhos HTTP. A velocidade de decode de uma resposta é aproximadamente <code>(tokens gerados − 1) / (tempo entre primeiro e último token)</code>. Throughput agregado soma o trabalho de todos os usuários; não representa a velocidade que cada um vê. Um evento de streaming pode carregar mais de um token, portanto contar linhas <code>data:</code> não resolve.</p>
+<p>O vLLM oferece um benchmark pronto. No Terminal B:</p>
+<pre><code class="language-bash">cd /workspace/yan-vllm
+source .venv/bin/activate
+export HF_HOME=/workspace/yan-vllm/hf-cache
+vllm bench serve --help
+</code></pre>
+<p>Os três primeiros comandos preparam o terminal como antes. <code>vllm bench serve --help</code> apenas mostra as opções do cliente de benchmark; não executa a carga e não inicia outro servidor.</p>
+<p>Um teste opcional pequeno, com prompts sintéticos e uma requisição por vez:</p>
+<pre><code class="language-bash">vllm bench serve \
+  --backend vllm \
+  --base-url http://127.0.0.1:8000 \
+  --endpoint /v1/completions \
+  --model qwen14b-int8 \
+  --tokenizer /workspace/models/Qwen2.5-14B-tokenizer \
+  --dataset-name random \
+  --random-input-len 256 \
+  --random-output-len 128 \
+  --num-prompts 10 \
+  --max-concurrency 1 \
+  --request-rate inf \
+  --seed 42 \
+  --save-result \
+  --result-dir resultados
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Argumento</th>
+<th>Explicação</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm bench serve</code></td>
+<td>Executa o cliente que envia requisições ao servidor já iniciado.</td>
+</tr>
+<tr>
+<td><code>--backend vllm</code></td>
+<td>Seleciona o adaptador de requisições do benchmark.</td>
+</tr>
+<tr>
+<td><code>--base-url ... --endpoint /v1/completions</code></td>
+<td>Define endereço e rota da API testada, dentro do Pod.</td>
+</tr>
+<tr>
+<td><code>--model qwen14b-int8</code></td>
+<td>Usa o alias anunciado pelo servidor.</td>
+</tr>
+<tr>
+<td><code>--tokenizer /workspace/models/Qwen2.5-14B-tokenizer</code></td>
+<td>Usa a pasta local do tokenizer Qwen2.5, preparada antes da medição.</td>
+</tr>
+<tr>
+<td><code>--dataset-name random</code></td>
+<td>Gera entradas sintéticas para medir desempenho.</td>
+</tr>
+<tr>
+<td><code>--random-input-len 256</code></td>
+<td>Configura o comprimento de entrada sintética em tokens.</td>
+</tr>
+<tr>
+<td><code>--random-output-len 128</code></td>
+<td>Configura o comprimento de saída solicitado; confira o comprimento efetivo no resultado.</td>
+</tr>
+<tr>
+<td><code>--num-prompts 10</code></td>
+<td>Envia dez solicitações na carga medida.</td>
+</tr>
+<tr>
+<td><code>--max-concurrency 1</code></td>
+<td>Mantém no máximo uma requisição ativa no cliente. É distinto do limite de sequências do servidor.</td>
+</tr>
+<tr>
+<td><code>--request-rate inf</code></td>
+<td>Não acrescenta um intervalo artificial entre chegadas; o limite de concorrência continua valendo.</td>
+</tr>
+<tr>
+<td><code>--seed 42</code></td>
+<td>Fixa a semente da geração de dados; não garante tempos idênticos nem determinismo absoluto de toda a execução.</td>
+</tr>
+<tr>
+<td><code>--save-result --result-dir resultados</code></td>
+<td>Grava o relatório na pasta indicada para você comparar depois.</td>
+</tr>
+</tbody>
+</table>
+<p>É uma sondagem de desempenho, não de qualidade de resposta. Rode uma vez para aquecer e repita para observar variação. Dez amostras ajudam a aprender, mas não sustentam conclusões fortes sobre percentis de cauda. O benchmark usa completions; seus testes manuais usaram chat com template. Mantenha o mesmo protocolo ao comparar resultados. Verifique os tokens efetivamente gerados e eventuais falhas no relatório.</p>
+<p>Confira as opções da versão instalada em <a href="https://docs.vllm.ai/en/v0.29.0/cli/bench/serve/">bench serve</a>. Se uma flag mudar, guarde o erro e o help em vez de modificar várias coisas juntas. Para investigar prefix caching, reinicie ou controle o cache: repetir o mesmo prompt pode reaproveitar trabalho e alterar o TTFT.</p>
+<h2 id="9-se-nao-funcionar">9. Se não funcionar</h2>
+<table>
+<thead>
+<tr>
+<th>Sintoma</th>
+<th>Primeiro passo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Connection refused</code></td>
+<td>Veja se o Terminal A terminou de iniciar ou saiu com erro; confira que o cliente está no mesmo Pod</td>
+</tr>
+<tr>
+<td><code>model not found</code> na API</td>
+<td>Use o alias <code>qwen14b-int8</code>, exibido por <code>/v1/models</code></td>
+</tr>
+<tr>
+<td>Erro de tamanho de contexto</td>
+<td>Encurte entrada/saída; ambas precisam caber em 2048, incluindo o template de chat</td>
+</tr>
+<tr>
+<td>Falta de espaço em disco</td>
+<td>Veja <code>df -h</code>; confirme <code>HF_HOME</code> em <code>/workspace</code> antes de baixar novamente</td>
+</tr>
+<tr>
+<td>Driver incompatível, importação CUDA falha</td>
+<td>Traga <code>nvidia-smi</code>, versão do vLLM/PyTorch e o primeiro erro do log</td>
+</tr>
+<tr>
+<td>OOM ao carregar pesos</td>
+<td>Confira processos usando VRAM; reduzir contexto não encolhe os pesos</td>
+</tr>
+<tr>
+<td>OOM ao preparar graphs</td>
+<td>Após salvar o log, tente acrescentar somente <code>--enforce-eager</code></td>
+</tr>
+<tr>
+<td>Não sobra memória para KV cache</td>
+<td>Confirme GPU livre; tente contexto 1024 como diagnóstico e uma pergunta curta</td>
+</tr>
+<tr>
+<td>Processo termina apenas com <code>Killed</code></td>
+<td>Confira RAM e <code>memory.events</code>; pode ser OOM de RAM, não de VRAM</td>
+</tr>
+<tr>
+<td>Erro de backend/kernel</td>
+<td>Guarde versão e traceback; investigue sem trocar o artefato</td>
+</tr>
+</tbody>
+</table>
+<p>Se o 14B impedir o aprendizado por falta de memória, registre a condição como não suportada neste roteiro. Reduzir o modelo seria outro experimento, com novo artefato, tokenizer e protocolo; não misture seus números.</p>
+<p>Quando me chamar, mande: etapa em que está, comando executado, <code>nvidia-smi</code>, versões e as últimas linhas do log, incluindo a causa inicial do erro. Não precisa mandar tokens de acesso ou chaves privadas.</p>
+<h2 id="10-encerrar-e-retomar-sem-sustos">10. Encerrar e retomar sem sustos</h2>
+<p><strong>Ctrl+C encerra o vLLM, mas não encerra a cobrança do Pod. Fechar a aba também não.</strong></p>
+<ol>
+<li>Encerre o servidor e baixe logs/resultados pelo navegador de arquivos do JupyterLab. Guarde também o nome do template e a configuração do Pod.</li>
+<li>No painel RunPod, use <strong>Stop</strong> quando estiver disponível e quiser manter o volume local. Confirme visualmente o estado parado; armazenamento continua sendo cobrado.</li>
+<li><strong>Terminate</strong> remove o Pod e os dados dos discos locais associados. Faça backup antes. Um network volume é separado e persiste, com cobrança própria.</li>
+</ol>
+<p>Pods com network volume podem permitir apenas terminar, em vez de parar. A opção exata depende do tipo de armazenamento; confira <a href="https://docs.runpod.io/pods/storage/types">as regras de persistência</a> antes da primeira sessão. Este roteiro propõe volume disk local para simplificar, não pressupõe que você tenha network volume.</p>
+<p>Ao retomar um Pod parado, pode não haver a mesma GPU disponível. Confirme <code>nvidia-smi</code>. Se <code>/workspace</code> foi preservado, ative <code>.venv</code>, exporte <code>HF_HOME</code> e execute o comando da seção 4. Arquivos do container fora do volume podem ter sido perdidos; mantenha o mesmo template para favorecer compatibilidade do ambiente Python.</p>
+<h2 id="11-ajustes-pequenos-no-plano-do-grupo">11. Ajustes pequenos no plano do grupo</h2>
+<p>Sua divisão faz sentido para explorar ferramentas. Este roteiro usa o mesmo arquivo GGUF nos runtimes; identifique o caminho e SHA-256 nos resultados para não misturar medições.</p>
+<ul>
+<li><strong>Não esperem escolher a melhor quantização para começar a medir.</strong> Guardem uma referência funcionando agora; “melhor” envolve qualidade, memória e latência no runtime escolhido.</li>
+<li><strong>Use o mesmo GGUF</strong> para comparar vLLM, llama.cpp e Ollama. Se um backend não aceitar o arquivo, preserve logs e marque falha; não atribua uma tabela incompleta a uma diferença de runtime. Consulte <a href="https://docs.ollama.com/import">importação no Ollama</a>.</li>
+<li><strong>O FP16 do 14B precisa de outra estratégia de memória.</strong> Uma GPU maior pode servir à avaliação de qualidade de referência. Seus tempos nela não são uma referência equivalente aos da 3090. Offload na 3090 também muda o experimento ao introduzir transferências CPU–GPU. Quantizar pode exigir mais recursos do que servir o resultado; Arthur deve dimensionar essa etapa separadamente e partir do checkpoint original em alta precisão para cada quantização.</li>
+<li><strong>O enunciado parte de 12 GB.</strong> A 3090 tem 24 GB. Registrem essa adaptação e alinhem com o professor se 12 GB for requisito, não apenas cenário ilustrativo. Limitar artificialmente o vLLM não torna a 3090 equivalente a uma GPU de 12 GB.</li>
+</ul>
+<p>No PDF <code>Problema2_Latencia_IO.pdf</code>, as páginas 5 e 13 pedem diagnóstico e dados antes/depois; a página 24 sugere medir antes de alterar. Para você, isso pode nascer naturalmente: primeiro faça funcionar, depois registre a observação que motivou cada mudança. Não é necessário antecipar toda a otimização agora.</p>
+<h2 id="12-caderno-minimo-de-experimentos">12. Caderno mínimo de experimentos</h2>
+<p>Copie este bloco para uma nota a cada descoberta:</p>
+<pre><code class="language-text">Data / Pod / GPU:
+Template / driver / vLLM:
+Modelo / revisão do checkpoint:
+Comando completo do servidor:
+Prompt / tokens de entrada / teto e tokens reais de saída:
+Servidor recém-iniciado ou aquecido? Prefix cache ligado?
+Uma mudança que fiz:
+O que eu esperava:
+O que observei: resposta, TTFT, decode, VRAM, RAM, erros
+O que ainda não sei:
+Próxima pergunta:
+</code></pre>
+<p>Para registrar o artefato efetivamente usado, calcule o SHA-256 do GGUF local e salve o caminho, tokenizer correspondente e versões dos pacotes.</p>
+<p><strong>Próxima ação concreta:</strong> criar o Pod, executar <code>nvidia-smi</code> e chegar à primeira resposta da seção 5. Todo o restante pode esperar sua curiosidade aparecer.</p></article>
+<footer>Guia de aprendizado, não resultado de benchmark. HTML autônomo: não depende de internet para leitura. Links de referência abrem as fontes externas. <a href="README.md">Versão Markdown</a>.</footer>
+<div class="status" role="status" aria-live="polite" id="copy-status"></div>
+</main>
+</div>
+<script>
+const toc=document.querySelector('aside .toc');
+if(toc) document.querySelector('.mobile-nav nav').append(toc.cloneNode(true));
+document.querySelectorAll('table').forEach(table=>{const wrap=document.createElement('div');wrap.className='table-wrap';table.before(wrap);wrap.append(table)});
+document.querySelectorAll('pre').forEach(pre=>{
+  const wrap=document.createElement('div');wrap.className='code-wrap';pre.before(wrap);
+  const bar=document.createElement('div');bar.className='code-bar';
+  const label=document.createElement('span');label.textContent=pre.querySelector('.language-bash')?'TERMINAL DO POD':'NOTAS';
+  const button=document.createElement('button');button.type='button';button.textContent='Copiar';button.setAttribute('aria-label','Copiar este bloco');
+  button.addEventListener('click',async()=>{
+    const text=pre.textContent;let copied=false;
+    try{await navigator.clipboard.writeText(text);copied=true}catch(error){
+      const area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.append(area);area.select();
+      try{copied=document.execCommand('copy')}catch(error){}area.remove();
+    }
+    button.textContent=copied?'Copiado':'Selecione o texto';
+    document.querySelector('#copy-status').textContent=copied?'Bloco copiado.':'Não foi possível copiar automaticamente; selecione e copie o bloco.';
+    setTimeout(()=>button.textContent='Copiar',2000);
+  });bar.append(label,button);wrap.append(bar,pre);
+});
+</script>
+</body>
+</html>

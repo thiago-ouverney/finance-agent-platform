@@ -1,0 +1,6 @@
+[
+  "vllm", "serve", "/workspace/models/Qwen2.5-14B-Instruct-Q8_0.gguf",
+  "--load-format", "gguf", "--quantization", "gguf", "--tokenizer", "/workspace/models/Qwen2.5-14B-tokenizer",
+  "--served-model-name", "qwen14b-q8-gguf", "--host", "127.0.0.1", "--port", "8000",
+  "--max-model-len", "16384", "--max-num-seqs", "1", "--gpu-memory-utilization", "0.95"
+]

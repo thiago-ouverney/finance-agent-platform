@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>RunPod + vLLM · Laboratório do Yan</title>
+<style>
+:root{--ink:#20332f;--muted:#566960;--accent:#176650;--paper:#fcfbf7;--line:#dce3dc}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.75 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent);text-underline-offset:3px;overflow-wrap:anywhere}a:hover{color:#ad562e}a:focus-visible,button:focus-visible{outline:3px solid #ca794b;outline-offset:4px}.layout{max-width:1400px;margin:auto;display:grid;grid-template-columns:280px minmax(0,1fr);gap:54px;padding:40px}aside{position:sticky;top:28px;height:calc(100vh - 56px);overflow:auto;padding-right:20px;font-size:13px}aside .brand{font-size:17px;font-weight:750;letter-spacing:-.5px;margin-bottom:5px}aside .sub{color:var(--muted);margin-bottom:25px}.toc ul{list-style:none;padding:0}.toc li{margin:0 0 12px}.toc a{text-decoration:none;display:block;padding-left:12px;border-left:2px solid var(--line)}.toc a:hover{border-color:var(--accent)}main{max-width:910px;min-width:0}header{border-top:5px solid var(--accent);padding:22px 0 20px;display:flex;justify-content:space-between;gap:15px;align-items:center}.eyebrow{font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:750;color:var(--accent)}.badge{border:1px solid var(--line);border-radius:30px;padding:4px 12px;font-size:12px;color:var(--muted)}h1{font-size:clamp(32px,4.4vw,54px);line-height:1.12;letter-spacing:-2px;max-width:760px;margin:20px 0 24px}h2{font-size:28px;line-height:1.3;letter-spacing:-.8px;margin:66px 0 22px;border-top:1px solid var(--line);padding-top:28px}h3{font-size:21px;margin-top:32px}p{margin:0 0 20px}li{margin-bottom:9px}strong{font-weight:700}code{font: .86em/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;background:#edf0e9;border-radius:4px;padding:2px 5px}pre{background:#172c29;color:#ebf5ef;border-radius:12px;padding:24px;overflow:auto;line-height:1.65;margin:0}pre code{background:transparent;padding:0;color:inherit;overflow-wrap:normal;font-size:13px}.code-wrap{margin:24px 0;position:relative}.code-bar{background:#233e37;color:#b8d7c9;border-radius:12px 12px 0 0;padding:7px 14px;display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:1px}.code-bar+pre{border-radius:0 0 12px 12px}button{cursor:pointer;font:inherit;font-size:12px;background:transparent;border:1px solid #6a9384;color:#f0fff7;padding:4px 10px;border-radius:5px}button:hover{background:#37594d}.table-wrap{overflow-x:auto;margin:24px 0;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.6}th{text-align:left;background:#e9eee5;font-weight:700}td,th{padding:14px 16px;vertical-align:top;border-bottom:1px solid var(--line);min-width:170px}tr:last-child td{border-bottom:0}tr:nth-child(even){background:#f4f5ef}footer{margin:60px 0 20px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}.mobile-nav{display:none}.status{font-size:12px;color:var(--muted)}
+@media(max-width:1050px){.layout{gap:28px;padding:25px;grid-template-columns:220px minmax(0,1fr)}aside{font-size:12px}}
+@media(max-width:760px){.layout{display:block;padding:20px}aside{position:static;height:auto;padding:0}.toc{display:none}.mobile-nav{display:block;margin:15px 0 25px}.mobile-nav .toc{display:block}aside>.brand,aside>.sub{display:none}h1{letter-spacing:-1px}h2{font-size:25px;margin-top:45px}header{padding-top:16px}.badge{display:none}body{font-size:16px}pre{padding:16px}}
+@media print{aside,button,.code-bar,.mobile-nav{display:none!important}.layout{display:block;padding:0}main{max-width:none}body{font-size:11pt;background:white}h1{font-size:28pt}h2{font-size:18pt;margin-top:25pt}pre{white-space:pre-wrap;background:#f1f3ef;color:black;border:1px solid #ccc}pre code{font-size:9pt}a{color:inherit}table{font-size:9pt}header{border-top-width:2px}.table-wrap{overflow:visible}}
+</style>
+</head>
+<body>
+<div class="layout">
+<aside aria-label="Navegação do guia"><div class="brand">Laboratório do Yan</div><div class="sub">Inferência local de LLMs · UFF</div><div class="toc">
+<ul>
+<li><a href="#1-colocar-os-arquivos-no-pod">1. Colocar os arquivos no Pod</a></li>
+<li><a href="#2-instalar-a-interface-em-outro-ambiente">2. Instalar a interface em outro ambiente</a></li>
+<li><a href="#3-iniciar">3. Iniciar</a></li>
+<li><a href="#4-abrir-no-navegador">4. Abrir no navegador</a></li>
+<li><a href="#5-usar-e-encerrar">5. Usar e encerrar</a></li>
+<li><a href="#6-retomar-em-outra-sessao">6. Retomar em outra sessão</a></li>
+<li><a href="#7-se-alguma-etapa-falhar">7. Se alguma etapa falhar</a></li>
+<li><a href="#configuracao-opcional">Configuração opcional</a></li>
+</ul>
+</div>
+</aside>
+<main>
+<header><span class="eyebrow">RunPod × vLLM</span><span class="badge">RTX 3090 · Qwen 14B · GGUF Q8_0</span></header>
+<details class="mobile-nav"><summary>Ir para uma etapa</summary><nav aria-label="Etapas no celular"></nav></details>
+<article><h1 id="chat-simples-para-o-modelo-do-arthur">Chat simples para o modelo do Arthur</h1>
+<p>Esta interface Python conversa com o vLLM existente. Não carrega outra cópia do modelo e não requer outra GPU. Tem histórico por sessão, streaming, Markdown para listas/código, botão de limpar e controles opcionais de temperatura e limite de saída. Não força respostas JSON: a apresentação é de um chatbot comum.</p>
+<p><strong>Você fará três coisas:</strong> copiar dois arquivos do Mac para o Pod, iniciar o programa Python no Pod e abrir a página do chat no navegador. Abrir este HTML no Mac mostra apenas as instruções; não inicia o aplicativo.</p>
+<table>
+<thead>
+<tr>
+<th>Onde</th>
+<th>O que você faz</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Finder no Mac</td>
+<td>Localiza os dois arquivos que serão enviados.</td>
+</tr>
+<tr>
+<td>Painel RunPod no navegador</td>
+<td>Abre o JupyterLab e configura o acesso à porta 7860.</td>
+</tr>
+<tr>
+<td>JupyterLab do Pod</td>
+<td>Recebe os arquivos e oferece os terminais Linux para executar os programas.</td>
+</tr>
+<tr>
+<td>Terminal A do Pod</td>
+<td>Mantém o vLLM rodando na porta 8000.</td>
+</tr>
+<tr>
+<td>Terminal B do Pod</td>
+<td>Mantém o chat Python rodando na porta 7860.</td>
+</tr>
+</tbody>
+</table>
+<p>Você pode continuar usando a mesma RTX 3090 e o mesmo Pod. Se o erro <code>libcudart.so.13</code> ainda não foi resolvido, volte ao <a href="index.html">guia principal, seção 3.1</a>: a interface não corrige a instalação do vLLM.</p>
+<h2 id="1-colocar-os-arquivos-no-pod">1. Colocar os arquivos no Pod</h2>
+<h3 id="no-mac-localizar-os-arquivos">No Mac: localizar os arquivos</h3>
+<ol>
+<li>Abra o <strong>Finder</strong>.</li>
+<li>Pressione <strong>Command + Shift + G</strong> para abrir “Ir para a pasta”.</li>
+<li>Cole o caminho abaixo e pressione Enter:</li>
+</ol>
+<pre><code class="language-text">/CAMINHO/LOCAL/runpod-vllm-lab
+</code></pre>
+<ol>
+<li>Localize <strong>chat.py</strong> e <strong>requirements-chat.txt</strong>. São esses dois arquivos que você vai enviar; deixe a janela do Finder aberta.</li>
+</ol>
+<p>Eles também estão ao lado deste HTML: <a href="chat.py">abrir chat.py</a> e <a href="requirements-chat.txt">abrir requirements-chat.txt</a>. Se o navegador mostrar o código ao clicar, isso é normal; o upload será feito pelo Finder.</p>
+<h3 id="no-navegador-abrir-o-jupyterlab-do-pod">No navegador: abrir o JupyterLab do Pod</h3>
+<ol>
+<li>Entre no painel RunPod e abra <strong>Pods</strong>.</li>
+<li>Localize seu Pod ligado e clique em <strong>Connect</strong>.</li>
+<li>Em <strong>HTTP Services</strong>, abra <strong>JupyterLab</strong>, geralmente na porta <strong>8888</strong>. Se pedir autenticação, use as informações disponibilizadas pelo template/RunPod; não é a senha do chat que criaremos depois.</li>
+<li>No painel de arquivos à esquerda do JupyterLab, localize a pasta <code>yan-vllm</code>. Muitos templates já abrem na raiz <code>/workspace</code>, então ela pode estar visível diretamente.</li>
+<li>Abra <code>yan-vllm</code>. Arraste <strong>chat.py</strong> e <strong>requirements-chat.txt</strong> do Finder para o painel de arquivos do JupyterLab. Alternativamente, use o botão de <strong>Upload Files</strong>, com ícone de seta para cima, e selecione os dois arquivos.</li>
+<li>Espere o upload concluir e confira que os dois nomes aparecem na pasta.</li>
+</ol>
+<p><strong>Destino esperado:</strong> <code>/workspace/yan-vllm/chat.py</code> e <code>/workspace/yan-vllm/requirements-chat.txt</code>. Não é preciso enviar o HTML ou os pesos do modelo. Copiar o caminho do seu Mac para um terminal remoto não transfere o arquivo: o upload é a etapa que faz essa transferência.</p>
+<p>Se <code>yan-vllm</code> não aparecer, abra um terminal no JupyterLab por <strong>File → New → Terminal</strong> (ou pelo botão <strong>+ → Terminal</strong>) e execute:</p>
+<pre><code class="language-bash">ls -ld /workspace/yan-vllm
+</code></pre>
+<p><code>ls -ld</code> verifica se a pasta existe e mostra seus dados, sem listar todos os arquivos dentro dela. Se existir, procure-a a partir da raiz de arquivos exposta pelo JupyterLab. Se o JupyterLab não estiver disponível no seu template, me diga quais opções aparecem em Connect para adaptarmos a transferência.</p>
+<p>Mantenha o vLLM do guia rodando no Terminal A, com o alias <code>qwen14b-int8</code>. O erro de CUDA precisa estar resolvido antes de o chat conseguir gerar respostas.</p>
+<h2 id="2-instalar-a-interface-em-outro-ambiente">2. Instalar a interface em outro ambiente</h2>
+<p>Abra <strong>outro terminal</strong>, sem interromper aquele em que o vLLM está rodando: no JupyterLab, use <strong>File → New → Terminal</strong> (ou <strong>+ → Terminal</strong>). Vamos chamá-lo de <strong>Terminal B</strong>. Todos os comandos abaixo são executados nele, não no terminal do Mac.</p>
+<p>Primeiro confirme o upload:</p>
+<pre><code class="language-bash">cd /workspace/yan-vllm
+ls -l chat.py requirements-chat.txt
+</code></pre>
+<p><code>cd</code> entra na pasta remota. <code>ls -l</code> deve mostrar os dois arquivos com tamanho maior que zero. Se aparecer <code>No such file or directory</code>, confira a pasta em que fez o upload antes de continuar.</p>
+<p>Depois instale:</p>
+<pre><code class="language-bash">cd /workspace/yan-vllm
+python3 -m venv .venv-chat
+source .venv-chat/bin/activate
+python -m pip install -r requirements-chat.txt
+</code></pre>
+<p><code>cd</code> entra na pasta onde você enviou os arquivos. <code>venv</code> cria um ambiente só para a interface, preservando as dependências do vLLM na outra <code>.venv</code>. <code>source</code> ativa esse ambiente no terminal atual. <code>pip install -r</code> instala as versões declaradas no arquivo. Faça a criação/instalação uma vez; nas próximas sessões, basta entrar na pasta e ativar <code>.venv-chat</code>.</p>
+<h2 id="3-iniciar">3. Iniciar</h2>
+<p>No mesmo Terminal B, primeiro verifique o servidor:</p>
+<pre><code class="language-bash">curl -fsS http://127.0.0.1:8000/v1/models
+</code></pre>
+<p>O comando deve mostrar um JSON contendo <code>qwen14b-int8</code>. Se der <code>Connection refused</code>, volte ao Terminal A e inicie o vLLM conforme a seção 4 do <a href="index.html">guia principal</a>. Aguarde a inicialização e repita esta consulta. A interface só consegue responder quando esse servidor está disponível.</p>
+<p>Com o servidor respondendo, inicie o chat:</p>
+<pre><code class="language-bash">python chat.py
+</code></pre>
+<p>O curl confirma que o vLLM responde e lista <code>qwen14b-int8</code>. O Python inicia a interface e pede que você <strong>crie uma senha</strong> no terminal; nada aparece enquanto você digita. O usuário de login é <strong>yan</strong>. Essa senha é do seu chat, não da conta RunPod.</p>
+<p>Digite uma senha e pressione Enter. Aguarde uma mensagem de que o aplicativo está disponível na porta <strong>7860</strong>. O terminal fica ocupado enquanto o programa roda; isso é esperado. O endereço <code>0.0.0.0:7860</code> exibido ali descreve onde o programa escuta no Pod — não é o link para abrir no Mac.</p>
+<p>Deixe os dois terminais abertos: A serve o modelo, B serve a interface. O chat se conecta a <code>127.0.0.1:8000/v1</code> dentro do Pod; seu navegador acessa a interface na porta 7860.</p>
+<h2 id="4-abrir-no-navegador">4. Abrir no navegador</h2>
+<ol>
+<li>Volte à aba do painel <strong>RunPod → Pods</strong> e expanda seu Pod.</li>
+<li>Abra o menu de opções do Pod e escolha <strong>Edit Pod</strong>. A posição/nome do menu pode variar na interface.</li>
+<li>Encontre <strong>Expose HTTP Ports</strong> e adicione <strong>7860</strong>, preservando as portas existentes. Por exemplo, se já houver <code>8888</code>, mantenha-a e acrescente <code>7860</code> no formato aceito pelo campo. Use a seção <strong>HTTP</strong>, não a de portas TCP.</li>
+<li>Salve a alteração. Se o painel avisar que o Pod será reiniciado, os programas precisam ser iniciados de novo depois; os comandos para retomar o chat estão na seção 6 abaixo.</li>
+<li>Aguarde o Pod estar pronto e confirme que o vLLM e o chat voltaram a rodar, caso tenha ocorrido reinício.</li>
+<li>Abra <strong>Connect → HTTP Services</strong> e clique no serviço da porta <strong>7860</strong>. Pode aparecer como um serviço HTTP genérico, sem o nome “chat”.</li>
+<li>Na tela de login, entre com usuário <strong>yan</strong> e a senha que você acabou de criar no Terminal B.</li>
+<li>Você deve ver <strong>Chat com Qwen · vLLM</strong>, uma área de conversa e um campo para digitar.</li>
+</ol>
+<p>O endereço tem o formato <code>https://SEU_POD_ID-7860.proxy.runpod.net</code>. A interface escuta em <code>0.0.0.0</code> para o proxy alcançá-la; o vLLM pode continuar restrito a <code>127.0.0.1</code>. Não precisa expor a porta 8000. Referência: <a href="https://docs.runpod.io/pods/configuration/expose-ports">portas HTTP no RunPod</a>.</p>
+<h2 id="5-usar-e-encerrar">5. Usar e encerrar</h2>
+<p>Para conferir o primeiro funcionamento, envie: <strong>“Explique KV cache em três tópicos e dê um exemplo curto.”</strong> Depois pergunte <strong>“Resuma sua resposta em uma frase.”</strong> A segunda pergunta usa o histórico da primeira.</p>
+<p>Digite uma pergunta e clique em <strong>Enviar</strong>. A resposta aparece aos poucos e preserva a formatação Markdown. Use <strong>Parar</strong> durante a geração e o botão de limpar do chat para iniciar outra conversa. O histórico é reenviado ao modelo em cada pergunta e não é salvo em disco pelo aplicativo; não conte com persistência após recarregar a página.</p>
+<p>O limite inicial do servidor é <strong>2048 tokens, somando histórico, pergunta e resposta</strong>. Uma conversa longa pode ultrapassá-lo. Nesse caso, limpe o histórico ou diminua o máximo de tokens. O aplicativo mostra o erro e não apaga mensagens silenciosamente. Temperatura começa em 0 e saída em 256; os ajustes ficam no painel adicional do Gradio.</p>
+<p>Um erro de conexão significa que o chat não encontrou o vLLM; confira o Terminal A. Um erro do proxy/502 normalmente pede conferir se <code>python chat.py</code> está ativo e se a porta 7860 foi exposta.</p>
+<p>Ctrl+C no Terminal B encerra a interface. Isso não encerra o servidor do Terminal A nem a cobrança do Pod. Para parar a cobrança de GPU, use o painel RunPod conforme o guia principal.</p>
+<h2 id="6-retomar-em-outra-sessao">6. Retomar em outra sessão</h2>
+<p>Depois de reiniciar o Pod, confirme que o vLLM voltou a rodar no Terminal A. Para o chat, abra outro terminal e execute:</p>
+<pre><code class="language-bash">cd /workspace/yan-vllm
+source .venv-chat/bin/activate
+python chat.py
+</code></pre>
+<p>Não precisa reinstalar as dependências se o ambiente no volume foi preservado. O programa pede uma senha ao iniciar; você pode escolher a mesma de antes. Abra novamente o serviço HTTP 7860 no RunPod.</p>
+<h2 id="7-se-alguma-etapa-falhar">7. Se alguma etapa falhar</h2>
+<table>
+<thead>
+<tr>
+<th>O que você vê</th>
+<th>O que conferir</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>can't open file ... chat.py</code></td>
+<td>O arquivo não está na pasta atual; execute <code>cd /workspace/yan-vllm</code> e confira o upload.</td>
+</tr>
+<tr>
+<td><code>No module named gradio</code></td>
+<td>Ative <code>.venv-chat</code> e execute a instalação com <code>python -m pip install -r requirements-chat.txt</code>.</td>
+</tr>
+<tr>
+<td>A senha não aparece enquanto digito</td>
+<td>É o comportamento normal do prompt de senha; digite e pressione Enter.</td>
+</tr>
+<tr>
+<td><code>Address already in use</code> na porta 7860</td>
+<td>Pode haver outra cópia do chat rodando. Volte ao terminal dela; não é necessário iniciar duas interfaces.</td>
+</tr>
+<tr>
+<td>Serviço 7860 não aparece em Connect</td>
+<td>Confira se a porta foi adicionada em Expose HTTP Ports e se a alteração foi salva.</td>
+</tr>
+<tr>
+<td>Página com 502 ou indisponível</td>
+<td>Confira se o Pod está ligado e se <code>python chat.py</code> está ativo no Terminal B após uma eventual reinicialização.</td>
+</tr>
+<tr>
+<td>Chat abre, mas falha ao enviar</td>
+<td>Veja se o vLLM está ativo no Terminal A e se <code>/v1/models</code> lista <code>qwen14b-int8</code>.</td>
+</tr>
+<tr>
+<td>Erro mencionando contexto/tokens</td>
+<td>Limpe a conversa e envie uma pergunta menor; histórico e saída compartilham o limite de 2048 tokens.</td>
+</tr>
+</tbody>
+</table>
+<p>Se continuar falhando, envie a etapa, o erro da tela e a saída do terminal correspondente. Não envie sua senha.</p>
+<h2 id="configuracao-opcional">Configuração opcional</h2>
+<p>O arquivo lê <code>VLLM_BASE_URL</code> e <code>VLLM_MODEL</code> caso você mude endereço ou alias. <code>VLLM_API_KEY</code> só é necessária se você habilitar autenticação no próprio vLLM. <code>CHAT_USER</code> muda o usuário de login, e <code>CHAT_PASSWORD</code> permite fornecer a senha por variável de ambiente em vez do prompt. Para a primeira execução, nenhum desses ajustes é necessário.</p>
+<p>Implementação com <a href="https://www.gradio.app/docs/gradio/chatinterface">Gradio ChatInterface</a>. O chat é uma interface de uso; seus tempos incluem navegador/proxy e não substituem o benchmark dentro do Pod.</p></article>
+<footer>Guia de aprendizado, não resultado de benchmark. HTML autônomo: não depende de internet para leitura. Links de referência abrem as fontes externas. <a href="CHAT.md">Versão Markdown</a>.</footer>
+<div class="status" role="status" aria-live="polite" id="copy-status"></div>
+</main>
+</div>
+<script>
+const toc=document.querySelector('aside .toc');
+if(toc) document.querySelector('.mobile-nav nav').append(toc.cloneNode(true));
+document.querySelectorAll('table').forEach(table=>{const wrap=document.createElement('div');wrap.className='table-wrap';table.before(wrap);wrap.append(table)});
+document.querySelectorAll('pre').forEach(pre=>{
+  const wrap=document.createElement('div');wrap.className='code-wrap';pre.before(wrap);
+  const bar=document.createElement('div');bar.className='code-bar';
+  const label=document.createElement('span');label.textContent=pre.querySelector('.language-bash')?'TERMINAL DO POD':'NOTAS';
+  const button=document.createElement('button');button.type='button';button.textContent='Copiar';button.setAttribute('aria-label','Copiar este bloco');
+  button.addEventListener('click',async()=>{
+    const text=pre.textContent;let copied=false;
+    try{await navigator.clipboard.writeText(text);copied=true}catch(error){
+      const area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.append(area);area.select();
+      try{copied=document.execCommand('copy')}catch(error){}area.remove();
+    }
+    button.textContent=copied?'Copiado':'Selecione o texto';
+    document.querySelector('#copy-status').textContent=copied?'Bloco copiado.':'Não foi possível copiar automaticamente; selecione e copie o bloco.';
+    setTimeout(()=>button.textContent='Copiar',2000);
+  });bar.append(label,button);wrap.append(bar,pre);
+});
+</script>
+</body>
+</html>

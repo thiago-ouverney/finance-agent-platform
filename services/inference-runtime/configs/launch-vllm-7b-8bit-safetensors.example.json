@@ -1,0 +1,17 @@
+[
+  "vllm",
+  "serve",
+  "/workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit",
+  "--tokenizer",
+  "/workspace/models/Qwen2.5-7B-Instruct-GGUF-8bit",
+  "--served-model-name",
+  "qwen7b-8bit-safetensors",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  "8000",
+  "--max-model-len",
+  "4096",
+  "--gpu-memory-utilization",
+  "0.95"
+]

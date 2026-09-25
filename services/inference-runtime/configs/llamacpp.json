@@ -1,0 +1,12 @@
+{
+  "runtime": "llama.cpp",
+  "base_url": "http://127.0.0.1:8080",
+  "model": "SUBSTITUA_PELO_ALIAS_DO_LLAMA_SERVER",
+  "tokenizer": "/workspace/models/Qwen2.5-14B-tokenizer",
+  "context_window": 4096,
+  "cache_policy": "runtime-default-unverified",
+  "runtime_version": "PREENCHER: commit do llama.cpp",
+  "model_artifact": "PREENCHER: SHA do GGUF e quantização exata",
+  "server_command": "PREENCHER: comando do llama-server, SEM segredos",
+  "notes": "Aponte para llama-server, não llama-cli. Apenas um servidor deve usar a GPU durante o teste."
+}
