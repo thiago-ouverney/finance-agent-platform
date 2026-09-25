@@ -1,0 +1,29 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Runtime state and dependencies
+node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+dist/
+.baileys_auth/
+data/
+logs/
+*.log
+
+# Models and generated experiment data
+*.gguf
+*.safetensors
+quantization/
+benchmarks/
+performance/
+results/
+results-from-*/
+
+# Local/editor files
+.DS_Store
+.idea/
+.vscode/
