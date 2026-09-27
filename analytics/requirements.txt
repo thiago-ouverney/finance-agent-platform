@@ -6,3 +6,8 @@ seaborn==0.13.2
 scikit-learn==1.7.2
 joblib==1.5.2
 pyarrow==21.0.0
+google-cloud-bigquery==3.42.1
+db-dtypes==1.7.0
+openai==2.29.0
+tqdm==4.70.0
+ollama==0.6.2

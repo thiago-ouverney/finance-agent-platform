@@ -2,6 +2,7 @@
 data/*.csv
 data/*.parquet
 models/*
+results/
 !data/.gitkeep
 !models/.gitkeep
 .ipynb_checkpoints/
