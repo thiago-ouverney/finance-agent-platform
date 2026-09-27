@@ -8,6 +8,8 @@ REMOTE_HOST ?=
 REMOTE_PORT ?= 22
 REMOTE_DIR ?= /workspace/finance-agent-platform/services/inference-runtime
 REMOTE_IDENTITY ?=
+QUANT_REMOTE_PORT ?=
+QUANT_SSH_OPTIONS = $(if $(strip $(QUANT_REMOTE_PORT)),-p "$(QUANT_REMOTE_PORT)") $(if $(REMOTE_IDENTITY),-i "$(REMOTE_IDENTITY)")
 EVAL_SSH_HOST ?=
 EVAL_LOCAL_PORT ?= 18000
 EVAL_REMOTE_PORT ?= 11434
@@ -19,13 +21,19 @@ EVAL_MODEL ?=
 EVAL_DATASET ?=
 EVAL_LIMIT ?=
 EVAL_SEED ?= 42
+QUANTIZATION_DIR ?= pipelines/qwen-quantization
+LOCAL_GOLDEN_DIR ?= analytics/results/mopep-golden-shareable
+REMOTE_GOLDEN_DIR ?= /workspace/data/mopep-golden
+REMOTE_GOLDEN_PARENT = $(dir $(REMOTE_GOLDEN_DIR))
 
 .DEFAULT_GOAL := help
 
 .PHONY: help setup install test build verify test-whatsapp test-inference test-analytics check-quantization access-add \
         setup-notebook notebook benchmark-dataset benchmark-tags predict-benchmark \
         benchmark-local benchmark-remote eval-tunnel eval-check eval-models eval-datasets eval-run \
-        eval-results eval-consolidate
+        eval-results eval-consolidate push-quantization-data quantization-doctor quantization-setup \
+        quantization-data-check smoke-quantize-model run-quantize-model verify-quantized-model \
+        upload-quantized-model
 
 help:
 	@printf '%s\n' \
@@ -45,6 +53,16 @@ help:
 		'  make test-inference                Executa os testes do runtime de inferência' \
 		'  make test-analytics                Executa os testes de analytics' \
 		'  make check-quantization            Valida os scripts de quantização' \
+		'' \
+		'Quantização no RunPod:' \
+		'  make push-quantization-data         Envia os CSVs privados ao Pod por SSH' \
+		'  make quantization-doctor            Diagnostica GPU, disco, RAM e HF_TOKEN' \
+		'  make quantization-setup             Instala o ambiente persistente no Pod' \
+		'  make quantization-data-check        Valida o golden e a amostra escolhida' \
+		'  make smoke-quantize-model           Testa Qwen 0.5B, GPTQ 4-bit e 8 exemplos' \
+		'  make run-quantize-model             Quantiza o modelo configurado' \
+		'  make verify-quantized-model         Recarrega e verifica o artefato' \
+		'  make upload-quantized-model         Publica a pasta validada no HF' \
 		'' \
 		'Analytics e benchmarks:' \
 		'  make notebook                      Abre o notebook de analytics' \
@@ -86,7 +104,41 @@ test-inference:
 	cd services/inference-runtime && python -m unittest discover -s tests
 
 check-quantization:
-	$(PYTHON) -m py_compile pipelines/qwen-quantization/quantize.py pipelines/qwen-quantization/benchmark.py pipelines/qwen-quantization/perplexity.py
+	$(MAKE) -C $(QUANTIZATION_DIR) check SYSTEM_PYTHON="$(PYTHON)"
+
+push-quantization-data:
+	@test -n "$(REMOTE_HOST)" || { echo 'Informe REMOTE_HOST=runpod-qwen.' >&2; exit 1; }
+	@for name in train.csv calibration.csv test.csv; do \
+		test -f "$(LOCAL_GOLDEN_DIR)/$$name" || { echo "Arquivo ausente: $(LOCAL_GOLDEN_DIR)/$$name" >&2; exit 1; }; \
+	done
+	@transfer_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$transfer_dir"' 0 1 2 3 15; \
+	cp "$(LOCAL_GOLDEN_DIR)/train.csv" "$(LOCAL_GOLDEN_DIR)/calibration.csv" "$(LOCAL_GOLDEN_DIR)/test.csv" "$$transfer_dir/"; \
+	(cd "$$transfer_dir" && sha256sum train.csv calibration.csv test.csv > SHA256SUMS); \
+	tar -C "$$transfer_dir" -czf - train.csv calibration.csv test.csv SHA256SUMS | \
+		ssh $(QUANT_SSH_OPTIONS) "$(REMOTE_HOST)" \
+		"set -eu; umask 077; mkdir -p '$(REMOTE_GOLDEN_PARENT)'; incoming=\$$(mktemp -d '$(REMOTE_GOLDEN_PARENT)mopep-golden-transfer.XXXXXX'); trap 'rm -rf \"\$$incoming\"' 0 1 2 3 15; tar -xzf - -C \"\$$incoming\"; cd \"\$$incoming\"; sha256sum --check --strict SHA256SUMS; chmod 600 train.csv calibration.csv test.csv; mkdir -p '$(REMOTE_GOLDEN_DIR)'; mv train.csv calibration.csv test.csv '$(REMOTE_GOLDEN_DIR)/'; sha256sum '$(REMOTE_GOLDEN_DIR)'/*.csv; cd /; rm -f \"\$$incoming/SHA256SUMS\"; rmdir \"\$$incoming\"; trap - 0 1 2 3 15"
+
+quantization-doctor:
+	$(MAKE) -C $(QUANTIZATION_DIR) doctor
+
+quantization-setup:
+	$(MAKE) -C $(QUANTIZATION_DIR) setup
+
+quantization-data-check:
+	$(MAKE) -C $(QUANTIZATION_DIR) data-check
+
+smoke-quantize-model:
+	$(MAKE) -C $(QUANTIZATION_DIR) smoke-quantize-model
+
+run-quantize-model:
+	$(MAKE) -C $(QUANTIZATION_DIR) run-quantize-model
+
+verify-quantized-model:
+	$(MAKE) -C $(QUANTIZATION_DIR) verify-quantized-model
+
+upload-quantized-model:
+	$(MAKE) -C $(QUANTIZATION_DIR) upload-quantized-model
 
 test-analytics:
 	$(ANALYTICS_PYTHON) -m unittest discover -s analytics/tests
