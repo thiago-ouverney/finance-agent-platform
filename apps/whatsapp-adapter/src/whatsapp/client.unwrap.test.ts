@@ -6,7 +6,7 @@ describe("unwrapMessage", () => {
   it("desembrulha documentWithCaptionMessage", () => {
     const inner: proto.IMessage = {
       documentMessage: {
-        fileName: "x.csv",
+        fileName: "x.pdf",
         caption: "legenda",
       },
     };
@@ -14,7 +14,7 @@ describe("unwrapMessage", () => {
       documentWithCaptionMessage: { message: inner },
     };
     const out = unwrapMessage(wrapped);
-    expect(out?.documentMessage?.fileName).toBe("x.csv");
+    expect(out?.documentMessage?.fileName).toBe("x.pdf");
   });
 
   it("desembrulha ephemeralMessage", () => {

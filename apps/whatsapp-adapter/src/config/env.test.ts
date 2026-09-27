@@ -11,6 +11,8 @@ describe("configuração do runtime de inferência", () => {
     vi.stubEnv("WHATSAPP_INFERENCE_MODEL", "qwen-whatsapp");
     vi.stubEnv("WHATSAPP_INFERENCE_TIMEOUT_MS", "120000");
     vi.stubEnv("WHATSAPP_SESSION_PATH", ".session-test");
+    vi.stubEnv("DATA_DIR", ".data-test");
+    vi.stubEnv("WHATSAPP_HISTORY_MAX_MESSAGES", "10");
 
     const cfg = loadEnv();
 
@@ -18,6 +20,8 @@ describe("configuração do runtime de inferência", () => {
     expect(cfg.openaiModel).toBe("qwen-whatsapp");
     expect(cfg.llmTimeoutMs).toBe(120000);
     expect(cfg.sessionPath.endsWith(".session-test")).toBe(true);
+    expect(cfg.dataDir.endsWith(".data-test")).toBe(true);
+    expect(cfg.conversationHistoryLimit).toBe(10);
     expect(hasLlmEndpoint(cfg)).toBe(true);
   });
 

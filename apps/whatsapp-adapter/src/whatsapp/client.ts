@@ -1,8 +1,6 @@
 import {
   DisconnectReason,
-  downloadMediaMessage,
   fetchLatestBaileysVersion,
-  jidNormalizedUser,
   makeWASocket,
   proto,
   useMultiFileAuthState,
@@ -12,19 +10,17 @@ import type { Boom } from "@hapi/boom";
 import Pino from "pino";
 import qrcode from "qrcode-terminal";
 import type { EnvConfig } from "../config/env.js";
-import { handleUserMessage } from "../agent/finance-agent.js";
-import { LocalStore } from "../storage/store.js";
-import { extractSenderCandidates } from "../whatsapp/access-control.js";
+import { handleUserMessage } from "../agent/chat-agent.js";
+import type { ConversationStore } from "../storage/conversation-store.js";
 import {
-  deniedMessageForReason,
-  featureDisabledMessage,
-  noFeaturesMessage,
-} from "../policy/messages.js";
-import type { PolicyService } from "../policy/resolver.js";
-import type { EffectivePolicy } from "../policy/types.js";
+  checkAccessCandidates,
+  primeAllowedPhoneMappings,
+  resolveSenderCandidates,
+} from "../whatsapp/access-control.js";
 import {
   isPermanentFatalDisconnect,
   MAX_RECONNECT_SCHEDULES_DEFAULT,
+  shouldReconnectAfterStatus,
   shouldScheduleAnotherReconnect,
 } from "./reconnect-policy.js";
 import { applyBaileysDecryptConsoleFilter } from "./libsignal-console-filter.js";
@@ -46,10 +42,10 @@ function disposeLastSocket(): void {
 let reconnectAttempt = 0;
 const RECONNECT_MS = [1000, 2000, 5000, 10000, 30000];
 
-function scheduleReconnect(cfg: EnvConfig, policySvc: PolicyService): void {
+function scheduleReconnect(cfg: EnvConfig, store: ConversationStore): void {
   if (!shouldScheduleAnotherReconnect(reconnectAttempt)) {
     console.error(
-      `[whatsapp] Limite de reconexões (${MAX_RECONNECT_SCHEDULES_DEFAULT}) atingido sem conexão estável. Pare o processo, corrija a causa (ex.: Node 20+, crypto global, native sqlite) e suba de novo.`
+      `[whatsapp] Limite de reconexões (${MAX_RECONNECT_SCHEDULES_DEFAULT}) atingido sem conexão estável. Pare o processo, corrija a causa e suba de novo.`
     );
     process.exit(1);
   }
@@ -58,7 +54,7 @@ function scheduleReconnect(cfg: EnvConfig, policySvc: PolicyService): void {
   reconnectAttempt += 1;
   console.info(`[whatsapp] Reconexão em ${ms}ms (tentativa ${reconnectAttempt})`);
   setTimeout(() => {
-    startWhatsAppBot(cfg, policySvc).catch(console.error);
+    startWhatsAppBot(cfg, store).catch(console.error);
   }, ms);
 }
 
@@ -86,7 +82,7 @@ export function unwrapMessage(
 
 export async function startWhatsAppBot(
   cfg: EnvConfig,
-  policySvc: PolicyService
+  store: ConversationStore
 ): Promise<void> {
   disposeLastSocket();
 
@@ -102,14 +98,21 @@ export async function startWhatsAppBot(
     logger: baileysLogger,
     printQRInTerminal: cfg.printQrInTerminal,
     auth: state,
-    browser: ["whatsapp-finance-agent", "Chrome", "1.0.0"],
+    browser: ["whatsapp-ai-chat", "Chrome", "1.0.0"],
     markOnlineOnConnect: false,
     syncFullHistory: false,
   });
 
   lastSocket = sock;
 
-  const store = new LocalStore(cfg.dataDir);
+  let allowedMappingsReady: Promise<number> | undefined;
+  const ensureAllowedMappings = (): Promise<number> => {
+    allowedMappingsReady ??= primeAllowedPhoneMappings(
+      cfg.allowedContacts,
+      (phoneJid) => sock.signalRepository.lidMapping.getLIDForPN(phoneJid)
+    );
+    return allowedMappingsReady;
+  };
 
   sock.ev.on("creds.update", saveCreds);
 
@@ -139,20 +142,26 @@ export async function startWhatsAppBot(
 
         if (isPermanentFatalDisconnect(reason)) {
           console.error(
-            "[whatsapp] Erro permanente de configuração/runtime — reconexão não ajuda. Corrija (ex.: Node 20 LTS, não usar Bun para este app, `npm install` no mesmo Node) e suba de novo."
+            "[whatsapp] Erro permanente de configuração/runtime — reconexão não ajuda. Corrija a configuração e suba de novo."
           );
           process.exit(1);
         }
 
-        const shouldReconnect =
-          statusCode !== DisconnectReason.loggedOut &&
-          statusCode !== DisconnectReason.badSession;
-        if (shouldReconnect) {
-          scheduleReconnect(cfg, policySvc);
+        if (shouldReconnectAfterStatus(statusCode)) {
+          scheduleReconnect(cfg, store);
+        } else if (statusCode === DisconnectReason.connectionReplaced) {
+          console.error(
+            "[whatsapp] Sessão substituída por outra instância (status 440). Encerre a outra instância antes de iniciar esta."
+          );
         }
       } else if (connection === "open") {
         reconnectAttempt = 0;
         console.info("[whatsapp] WhatsApp conectado.");
+        void ensureAllowedMappings().then((resolved) => {
+          console.info(
+            `[whatsapp] Mapeamentos telefone→LID preparados: ${resolved}/${cfg.allowedContacts.length}`
+          );
+        });
       }
     }
   );
@@ -172,43 +181,22 @@ export async function startWhatsAppBot(
           continue;
         }
 
-        const candidates = extractSenderCandidates(msg);
-        const access = policySvc.resolveFromCandidates(candidates);
+        await ensureAllowedMappings();
+        const candidates = await resolveSenderCandidates(
+          msg,
+          (lidJid) => sock.signalRepository.lidMapping.getPNForLID(lidJid)
+        );
+        const access = checkAccessCandidates(candidates, cfg);
 
-        if (access.kind === "denied") {
+        if (!access.allowed) {
           console.info(
-            `[whatsapp] Acesso negado jid=${jid} reason=${access.reason} candidatos=[${candidates.join(",")}]`
+            `[whatsapp] Acesso negado jid=${jid} candidatos=[${candidates.join(",")}]`
           );
           if (cfg.replyToDenied) {
-            const text = deniedMessageForReason(
-              policySvc.db,
-              cfg,
-              access.reason
-            );
-            await sock.sendMessage(jid, { text });
+            await sock.sendMessage(jid, { text: cfg.deniedMessage });
           }
           continue;
         }
-
-        if (access.kind === "blocked_no_features") {
-          console.info(
-            `[whatsapp] Sem features jid=${jid} contact=${access.contactId}`
-          );
-          if (cfg.replyToDenied) {
-            await sock.sendMessage(jid, {
-              text: noFeaturesMessage(policySvc.db),
-            });
-          }
-          continue;
-        }
-
-        const authorizedContactId = access.contactId;
-        const effectivePolicy: EffectivePolicy = {
-          model: access.model,
-          features: access.features,
-          identitySource: access.identitySource,
-        };
-        const featureDisabledReply = featureDisabledMessage(policySvc.db);
 
         const unwrapped = unwrapMessage(msg.message);
         if (!unwrapped) {
@@ -216,66 +204,21 @@ export async function startWhatsAppBot(
           continue;
         }
 
-        let body = extractText(unwrapped);
-        let filename: string | undefined;
-        let rawCsvFromFile: string | undefined;
-        const doc = unwrapped.documentMessage;
-        const lowerName = doc?.fileName?.toLowerCase() ?? "";
-        if (lowerName.endsWith(".csv")) {
-          filename = doc?.fileName ?? undefined;
-          try {
-            const buf = await downloadMediaMessage(
-              msg,
-              "buffer",
-              {},
-              {
-                logger: baileysLogger,
-                reuploadRequest: sock.updateMediaMessage,
-              }
-            );
-            rawCsvFromFile = buf.toString("utf8");
-            if (!body?.trim()) {
-              body = buf.toString("utf8");
-            }
-            console.info(`[whatsapp] CSV baixado jid=${jid} bytes=${buf.length}`);
-          } catch (e) {
-            if (!body?.trim()) {
-              console.error("[whatsapp] Falha ao baixar CSV:", e);
-              await sock.sendMessage(jid, {
-                text: "Não consegui ler o arquivo CSV. Envie o texto colado ou tente de novo.",
-              });
-              continue;
-            }
-            console.warn(
-              `[whatsapp] Falha ao baixar CSV, seguindo com texto/caption jid=${jid}`
-            );
-          }
-        }
+        const body = extractText(unwrapped);
 
         if (!body?.trim()) {
           console.info(
-            `[whatsapp] Ignorado: sem texto/caption após unwrap jid=${jid} temDoc=${Boolean(doc)}`
+            `[whatsapp] Ignorado: mensagem sem texto jid=${jid}`
           );
           continue;
         }
-
-        const normalized = jidNormalizedUser(jid);
-        const sourceChatId = normalized ?? jid;
 
         try {
           const reply = await handleUserMessage(
             cfg,
             store,
-            authorizedContactId,
-            body,
-            {
-            filename,
-            sourceChatId,
-            sourceJid: jid,
-            rawCsvFromFile,
-            policy: effectivePolicy,
-            featureDisabledReply,
-          }
+            access.authorizedContactId,
+            body
           );
           await sock.sendMessage(jid, { text: reply });
         } catch (e) {

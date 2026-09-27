@@ -2,7 +2,7 @@ import "./bootstrap-webcrypto.js";
 
 /**
  * Os testes devem ser determinísticos e não depender do `.env` da máquina
- * (chaves de API, allowlist, tetos de LLM, etc.). O Vitest/Vite pode injetar
+ * (chaves de API e allowlist). O Vitest/Vite pode injetar
  * variáveis do `.env` no `process.env` antes dos arquivos de teste rodarem;
  * este setup roda cedo e neutraliza as que costumam quebrar asserções.
  */
@@ -14,18 +14,11 @@ const KEYS_TO_DELETE = [
   "WHATSAPP_INFERENCE_MODEL",
   "WHATSAPP_INFERENCE_TIMEOUT_MS",
   "WHATSAPP_SESSION_PATH",
+  "WHATSAPP_HISTORY_MAX_MESSAGES",
   "ALLOWED_CONTACTS",
-  "ADMIN_TOKEN",
-  "POLICY_DB_PATH",
-  "POLICY_SOURCE",
-  "POLICY_CACHE_TTL_MS",
-  "LLM_MAX_REQUEST_TOKENS",
+  "DATA_DIR",
   "LLM_MAX_OUTPUT_TOKENS",
-  "LLM_DAILY_TOKEN_BUDGET_PER_USER",
-  "LLM_DAILY_BUDGET_TIMEZONE",
   "LLM_TIMEOUT_MS",
-  "LLM_LOG_JSON",
-  "ALLOWED_OPENAI_MODELS",
 ] as const;
 
 for (const k of KEYS_TO_DELETE) {

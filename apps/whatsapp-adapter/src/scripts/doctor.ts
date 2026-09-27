@@ -24,19 +24,6 @@ async function main(): Promise<void> {
   ok("Web Crypto (globalThis.crypto.subtle)");
 
   try {
-    const { default: Database } = await import("better-sqlite3");
-    const db = new Database(":memory:");
-    db.prepare("SELECT 1").get();
-    db.close();
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    fail(
-      `better-sqlite3: ${msg} — rode rm -rf node_modules && npm install no mesmo Node deste doctor.`
-    );
-  }
-  ok("better-sqlite3 (addon nativo)");
-
-  try {
     await import("dotenv/config");
   } catch {
     /* opcional */
@@ -44,7 +31,7 @@ async function main(): Promise<void> {
   const { loadEnv } = await import("../config/env.js");
   const cfg = loadEnv();
   ok(
-    `loadEnv() — policyDbPath=${cfg.policyDbPath} policySource=${cfg.policySource} allowedContacts=${cfg.allowedContacts.length}`
+    `loadEnv() — model=${cfg.openaiModel} endpoint=${cfg.openaiBaseUrl ?? "não configurado"} allowedContacts=${cfg.allowedContacts.length}`
   );
 
   console.info("[doctor] Concluído. Próximo passo: npm run dev (Node, não Bun).");

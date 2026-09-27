@@ -1,3 +1,0 @@
-expense_id,source_file,source_row_index,uploaded_at,transaction_date,invoice_month,descricao,valor,categoria,kind
-manual_0001,migracao_historico.csv,0,2026-01-31T12:00:00.000Z,2026-01-10,2026-01,mercado bairro,125.90,Mercado,consumo
-manual_0002,migracao_historico.csv,1,2026-01-31T12:00:00.000Z,2026-01-12,2026-01,pagamento fatura,450.00,Pagamento fatura,financeiro_nao_consumo

@@ -21,7 +21,7 @@ describe("isLibsignalSessionDecryptNoiseArgs", () => {
 
   it("não suprime erro genérico de app", () => {
     expect(
-      isLibsignalSessionDecryptNoiseArgs(["[whatsapp] Falha ao baixar CSV:", new Error("x")])
+      isLibsignalSessionDecryptNoiseArgs(["[whatsapp] Erro ao processar mensagem:", new Error("x")])
     ).toBe(false);
   });
 });

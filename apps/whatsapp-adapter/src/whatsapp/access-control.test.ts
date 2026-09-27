@@ -4,6 +4,8 @@ import {
   checkAccessCandidates,
   extractSenderCandidates,
   extractSenderDigits,
+  primeAllowedPhoneMappings,
+  resolveSenderCandidates,
 } from "../whatsapp/access-control.js";
 import type { EnvConfig } from "../config/env.js";
 import { testEnvConfig } from "../test/test-env-config.js";
@@ -42,6 +44,33 @@ describe("extractSenderCandidates", () => {
     expect(extractSenderCandidates(msg as never)).toContain("5511988888888");
   });
 
+  it("usa o JID alternativo com telefone antes do LID", () => {
+    const msg = {
+      key: {
+        remoteJid: "12345678901234@lid",
+        remoteJidAlt: "5511988888888@s.whatsapp.net",
+      },
+    };
+    expect(extractSenderCandidates(msg as never)).toEqual([
+      "5511988888888",
+      "12345678901234",
+    ]);
+  });
+
+  it("resolve LID para o telefone canônico do mapa do Baileys", async () => {
+    const msg = {
+      key: { remoteJid: "12345678901234@lid" },
+    };
+    const candidates = await resolveSenderCandidates(
+      msg as never,
+      async (lid) =>
+        lid === "12345678901234@lid"
+          ? "5511988888888@s.whatsapp.net"
+          : null
+    );
+    expect(candidates).toEqual(["5511988888888", "12345678901234"]);
+  });
+
   it("prioriza participant em grupo", () => {
     const msg = {
       key: {
@@ -50,6 +79,26 @@ describe("extractSenderCandidates", () => {
       },
     };
     expect(extractSenderCandidates(msg as never)).toContain("5511888888888");
+  });
+});
+
+describe("primeAllowedPhoneMappings", () => {
+  it("consulta uma vez cada telefone autorizado e continua após falha isolada", async () => {
+    const requested: string[] = [];
+    const count = await primeAllowedPhoneMappings(
+      ["+55 11 98888-8888", "5511988888888", "55 21 97777-7777"],
+      async (phoneJid) => {
+        requested.push(phoneJid);
+        if (phoneJid.startsWith("5521")) throw new Error("falha temporária");
+        return "12345678901234@lid";
+      }
+    );
+
+    expect(requested).toEqual([
+      "5511988888888@s.whatsapp.net",
+      "5521977777777@s.whatsapp.net",
+    ]);
+    expect(count).toBe(1);
   });
 });
 
