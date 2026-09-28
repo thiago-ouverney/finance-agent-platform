@@ -5,9 +5,9 @@
 > `train.csv`, verificar o checkpoint e publicá-lo de forma explícita no
 > namespace `thiagoouverney` do Hugging Face.
 
-O fluxo com golden pertence a `pipelines/qwen-quantization`. O fluxo GGUF para
-Ollama continua separado em `services/inference-runtime`, pois a quantização
-GGUF atual é weight-only e não usa dataset.
+Os builds GPTQ/AWQ/EXL3 e GGUF/iMatrix pertencem a
+`pipelines/qwen-quantization`. O carregamento e a comparação dos GGUFs em
+vLLM, llama.cpp e Ollama pertencem a `services/inference-runtime`.
 
 Neste guia, “Pod vazio” significa `/workspace` vazio sobre uma imagem RunPod
 NVIDIA/PyTorch já compatível com CUDA, não um sistema operacional mínimo sem
@@ -413,25 +413,16 @@ make run-quantize-model \
 Mesmo quando `main` é informado como seletor, o download resolve primeiro o
 commit atual e grava essa revisão imutável no modelo e no manifesto.
 
-## 11. Fluxo separado para GGUF/Ollama
+## 11. GGUF com e sem iMatrix
 
-GPTQ/AWQ/EXL3 usam o golden como calibração. O GGUF Q8_0 oficial continua
-weight-only e é produzido por:
+O pipeline agora possui um experimento GGUF separado que gera, a partir do
+mesmo BF16, `Q4_K_M` sem iMatrix, `Q4_K_M` com iMatrix derivada do `train.csv`
+e `Q8_0` como referência. Os três resultados comparados são arquivos GGUF
+únicos e podem ser exercitados sequencialmente em vLLM, llama.cpp e Ollama.
 
-```bash
-cd /workspace/finance-agent-platform/services/inference-runtime
-export HF_MODEL_DIR=/workspace/models/Qwen2.5-7B-Instruct-original
-export GGUF_OUTPUT_DIR=/workspace/models/Qwen2.5-7B-Instruct-GGUF-Q8_0
-export MODEL_7B_GGUF="$GGUF_OUTPUT_DIR/Qwen2.5-7B-Instruct-Q8_0.gguf"
-export HF_REVISION='<commit-imutavel>'
-make install-benchmark
-make download-source
-make quantize-q8
-make verify-gguf
-```
-
-Não converta um GPTQ/AWQ já quantizado para GGUF: o fluxo explícito parte do
-checkpoint original BF16/FP16 para evitar dupla quantização.
+Siga [o guia GGUF/iMatrix](gerar-gguf-imatrix.md). Não converta um GPTQ/AWQ
+já quantizado para GGUF: o fluxo parte do checkpoint original BF16/FP16 para
+evitar dupla quantização.
 
 ## 12. Encerrar a sessão com segurança
 

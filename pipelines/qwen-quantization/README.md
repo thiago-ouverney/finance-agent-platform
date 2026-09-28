@@ -43,6 +43,50 @@ See [`docs/guias/gerar-modelo-quantizado.md`](../../docs/guias/gerar-modelo-quan
 for the empty-Pod bootstrap, private data transfer, token setup, verification,
 and private Hub publication commands.
 
+## Reproducible GGUF/iMatrix comparison
+
+The llama.cpp workflow builds three single-file artifacts from the same pinned
+Qwen2.5-7B BF16 GGUF source:
+
+1. `Q4_K_M` without an importance matrix;
+2. `Q4_K_M` with an importance matrix computed from 256 deterministic
+   `train.csv` examples rendered through the Qwen chat template;
+3. `Q8_0` as a higher-fidelity reference.
+
+Comparing the two Q4 files isolates the effect of the iMatrix. Q8_0 is a
+reference, not an iMatrix pair: llama.cpp does not apply importance weights to
+the Q8_0 quantizer. The Hugging Face checkpoint is a build input, while all
+three comparison artifacts and the BF16 intermediate are GGUF files. The
+private rendered corpus is stored under `/workspace/data/quantization`, never
+inside a model repository.
+
+```shell
+export QUANT_ENV_FILE=/workspace/quantization.env
+make -C pipelines/qwen-quantization gguf-doctor
+make -C pipelines/qwen-quantization gguf-setup
+make -C pipelines/qwen-quantization gguf-smoke-build
+make -C pipelines/qwen-quantization gguf-build-comparison
+make -C pipelines/qwen-quantization gguf-verify-comparison
+```
+
+The build pins both the Hugging Face source revision and the llama.cpp commit,
+records hashes for the dataset selection, corpus, iMatrix, BF16 intermediate,
+and final files, refuses `test.csv`, and never requantizes an already quantized
+checkpoint. A per-stage progress manifest prevents an interrupted build from
+silently legitimizing a replaced intermediate on resume. Runtime comparison is
+a separate, sequential 3×3 matrix in
+`services/inference-runtime`; it records the exact GGUF SHA for every cell and
+requires the build manifest, records the tokenizer metadata hash, and does not
+fall back to another format when a runtime rejects a file.
+
+See [`docs/guias/gerar-gguf-imatrix.md`](../../docs/guias/gerar-gguf-imatrix.md)
+for the complete RunPod commands and the vLLM, llama.cpp, and Ollama smoke and
+benchmark sequence.
+
+This GGUF workflow deliberately stops after local build, verification, and
+runtime comparison. It has no Hub upload target yet; do not reuse the legacy
+single-Q8 upload command for this three-artifact set.
+
 The sections below document the original experimental helper. Without
 `--calibration-csv`, it deliberately retains the legacy MMLU calibration
 fallback.

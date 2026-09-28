@@ -16,6 +16,9 @@ Consulte [a arquitetura](docs/architecture.md) para o fluxo entre os componentes
 Para reproduzir a quantização no RunPod, siga o
 [guia do modelo quantizado](docs/guias/gerar-modelo-quantizado.md).
 
+Para gerar `Q4_K_M`, `Q4_K_M` com iMatrix e `Q8_0` e compará-los nos três
+runtimes, siga o [guia GGUF/iMatrix](docs/guias/gerar-gguf-imatrix.md).
+
 ## Comandos da raiz
 
 Execute `make` sem argumentos para listar os targets disponíveis. A preparação
