@@ -13,6 +13,9 @@ Os repositórios anteriores permanecem disponíveis apenas como legado. O desenv
 
 Consulte [a arquitetura](docs/architecture.md) para o fluxo entre os componentes.
 
+Para reproduzir a quantização no RunPod, siga o
+[guia do modelo quantizado](docs/guias/gerar-modelo-quantizado.md).
+
 ## Comandos da raiz
 
 Execute `make` sem argumentos para listar os targets disponíveis. A preparação
