@@ -1,0 +1,189 @@
+# Extensão isolada do Makefile principal para comparar três variantes GGUF.
+GGUF_COMPARISON_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+include $(GGUF_COMPARISON_DIR)/Makefile
+.DEFAULT_GOAL := gguf-comparison-help
+
+GGUF_COMPARISON_PYTHON ?= $(SYSTEM_PYTHON)
+GGUF_COMPARISON_RESULTS ?= $(CURDIR)/results
+GGUF_COMPARISON_OUTPUT ?= $(GGUF_COMPARISON_RESULTS)/.generated/gguf-comparison
+GGUF_COMPARISON_LOCK ?= /workspace/locks/qwen-gguf-runtime-matrix.lock
+GGUF_COMPARISON_CONTEXT ?= 16384
+GGUF_COMPARISON_GPU_MEMORY_UTILIZATION ?= 0.95
+GGUF_VARIANT ?=
+GGUF_RESULT_NAME ?= gguf-$(GGUF_VARIANT)-base
+
+GGUF_Q8_FILE ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-comparison/Qwen2.5-7B-Instruct-Q8_0.gguf
+GGUF_Q4_BASE_FILE ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-comparison/Qwen2.5-7B-Instruct-Q4_K_M.gguf
+GGUF_Q4_IMATRIX_FILE ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-comparison/Qwen2.5-7B-Instruct-Q4_K_M-imatrix.gguf
+GGUF_COMPARISON_MANIFEST ?= /workspace/models/Qwen2.5-7B-Instruct-GGUF-comparison/gguf-comparison-manifest.json
+
+GGUF_RENDER_MAKE_VARS = \
+	--render-make-var "GGUF_Q8_FILE=$(GGUF_Q8_FILE)" \
+	--render-make-var "GGUF_Q4_BASE_FILE=$(GGUF_Q4_BASE_FILE)" \
+	--render-make-var "GGUF_Q4_IMATRIX_FILE=$(GGUF_Q4_IMATRIX_FILE)" \
+	--render-make-var "GGUF_COMPARISON_MANIFEST=$(GGUF_COMPARISON_MANIFEST)" \
+	--render-make-var "MODEL_7B_TOKENIZER=$(MODEL_7B_TOKENIZER)" \
+	--render-make-var "GGUF_COMPARISON_CONTEXT=$(GGUF_COMPARISON_CONTEXT)" \
+	--render-make-var "GGUF_COMPARISON_GPU_MEMORY_UTILIZATION=$(GGUF_COMPARISON_GPU_MEMORY_UTILIZATION)" \
+	--render-make-var "GGUF_COMPARISON_PYTHON=$(GGUF_COMPARISON_PYTHON)"
+
+GGUF_MATRIX_MAKE_VARS = \
+	--make-var "BENCH_SCENARIOS=$(BENCH_SCENARIOS)" \
+	--make-var "BENCH_REQUESTS=$(BENCH_REQUESTS)" \
+	--make-var "BENCH_REPETITIONS=$(BENCH_REPETITIONS)" \
+	--make-var "BENCH_WARMUP=$(BENCH_WARMUP)" \
+	--make-var "BENCH_MODE=$(BENCH_MODE)" \
+	--make-var "CONVERSATION_TURNS=$(CONVERSATION_TURNS)" \
+	--make-var "CONVERSATION_FIXTURE=$(CONVERSATION_FIXTURE)" \
+	--make-var "WARMUP_CONVERSATION_FIXTURE=$(WARMUP_CONVERSATION_FIXTURE)" \
+	--make-var "BENCH_STARTUP_TIMEOUT=$(BENCH_STARTUP_TIMEOUT)" \
+	--make-var "SWEEP_START=$(SWEEP_START)" \
+	--make-var "SWEEP_MEMORY_STEP_MB=$(SWEEP_MEMORY_STEP_MB)" \
+	--make-var "SWEEP_MAX_CONTEXT=$(SWEEP_MAX_CONTEXT)" \
+	--make-var "SWEEP_REQUESTS=$(SWEEP_REQUESTS)" \
+	--make-var "SWEEP_REPETITIONS=$(SWEEP_REPETITIONS)" \
+	--make-var "SWEEP_WARMUP=$(SWEEP_WARMUP)" \
+	--make-var "SWEEP_MODE=$(SWEEP_MODE)" \
+	--make-var "SWEEP_CONVERSATION_TURNS=$(SWEEP_CONVERSATION_TURNS)" \
+	--make-var "SWEEP_CONVERSATION_FIXTURE=$(SWEEP_CONVERSATION_FIXTURE)" \
+	--make-var "VLLM_EXTRA_ARGS=$(VLLM_EXTRA_ARGS)" \
+	--make-var "LLAMA_EXTRA_ARGS=$(LLAMA_EXTRA_ARGS)" \
+	--make-var "OLLAMA_EXTRA_ARGS=$(OLLAMA_EXTRA_ARGS)" \
+	--make-var "VLLM_BIN=$(VLLM_BIN)" \
+	--make-var "VLLM_PYTHON=$(VLLM_PYTHON)" \
+	--make-var "LLAMA_SERVER_BIN=$(LLAMA_SERVER_BIN)" \
+	--make-var "LLAMA_BACKEND_PATH=$(LLAMA_BACKEND_PATH)" \
+	--make-var "REQUIRE_GPU=$(REQUIRE_GPU)" \
+	--make-var "OLLAMA_BIN=$(OLLAMA_BIN)" \
+	--make-var "PYTHON=$(PYTHON)" \
+	--make-var "SYSTEM_PYTHON=$(SYSTEM_PYTHON)"
+
+.PHONY: gguf-comparison-help gguf-comparison-render gguf-comparison-smoke gguf-comparison-bench \
+	gguf-prepare-ollama gguf-smoke-vllm gguf-smoke-llama gguf-smoke-ollama \
+	gguf-base-vllm gguf-base-llama gguf-base-ollama
+
+gguf-comparison-help:
+	@printf '%s\n' \
+		'Comparação sequencial de 3 GGUFs × 3 runtimes' \
+		'' \
+		'  make -f Makefile.gguf-comparison gguf-comparison-render' \
+		'  make -f Makefile.gguf-comparison gguf-comparison-smoke' \
+		'  make -f Makefile.gguf-comparison gguf-comparison-bench' \
+		'' \
+		'Sobrescreva GGUF_Q8_FILE, GGUF_Q4_BASE_FILE e GGUF_Q4_IMATRIX_FILE.' \
+		'O tokenizer vem de MODEL_7B_TOKENIZER; o manifesto comum prova SHA, qtype e uso de imatrix.' \
+		'A matriz proíbe fallback e não executa em paralelo.'
+
+gguf-comparison-render:
+	@mkdir -p "$(GGUF_COMPARISON_OUTPUT)"
+	"$(GGUF_COMPARISON_PYTHON)" scripts/render_gguf_variant.py \
+		--variant q8_0 --gguf "$(GGUF_Q8_FILE)" --tokenizer "$(MODEL_7B_TOKENIZER)" \
+		--output-dir "$(GGUF_COMPARISON_OUTPUT)" --context "$(GGUF_COMPARISON_CONTEXT)" \
+		--gpu-memory-utilization "$(GGUF_COMPARISON_GPU_MEMORY_UTILIZATION)" \
+		--source-manifest "$(GGUF_COMPARISON_MANIFEST)"
+	"$(GGUF_COMPARISON_PYTHON)" scripts/render_gguf_variant.py \
+		--variant q4_k_m_base --gguf "$(GGUF_Q4_BASE_FILE)" --tokenizer "$(MODEL_7B_TOKENIZER)" \
+		--output-dir "$(GGUF_COMPARISON_OUTPUT)" --context "$(GGUF_COMPARISON_CONTEXT)" \
+		--gpu-memory-utilization "$(GGUF_COMPARISON_GPU_MEMORY_UTILIZATION)" \
+		--source-manifest "$(GGUF_COMPARISON_MANIFEST)"
+	"$(GGUF_COMPARISON_PYTHON)" scripts/render_gguf_variant.py \
+		--variant q4_k_m_imatrix --gguf "$(GGUF_Q4_IMATRIX_FILE)" --tokenizer "$(MODEL_7B_TOKENIZER)" \
+		--output-dir "$(GGUF_COMPARISON_OUTPUT)" --context "$(GGUF_COMPARISON_CONTEXT)" \
+		--gpu-memory-utilization "$(GGUF_COMPARISON_GPU_MEMORY_UTILIZATION)" \
+		--source-manifest "$(GGUF_COMPARISON_MANIFEST)"
+
+gguf-comparison-smoke:
+	"$(GGUF_COMPARISON_PYTHON)" scripts/run_gguf_matrix.py \
+		--mode smoke --profiles-dir "$(GGUF_COMPARISON_OUTPUT)" \
+		--workdir "$(CURDIR)" --makefile "$(CURDIR)/Makefile.gguf-comparison" \
+		--results-root "$(GGUF_COMPARISON_RESULTS)" --lock-file "$(GGUF_COMPARISON_LOCK)" \
+		--render-target gguf-comparison-render $(GGUF_RENDER_MAKE_VARS) \
+		$(GGUF_MATRIX_MAKE_VARS)
+
+gguf-comparison-bench:
+	"$(GGUF_COMPARISON_PYTHON)" scripts/run_gguf_matrix.py \
+		--mode formal --profiles-dir "$(GGUF_COMPARISON_OUTPUT)" \
+		--workdir "$(CURDIR)" --makefile "$(CURDIR)/Makefile.gguf-comparison" \
+		--results-root "$(GGUF_COMPARISON_RESULTS)" --lock-file "$(GGUF_COMPARISON_LOCK)" \
+		--render-target gguf-comparison-render $(GGUF_RENDER_MAKE_VARS) \
+		$(GGUF_MATRIX_MAKE_VARS)
+
+gguf-prepare-ollama: prepare-benchmark
+	@echo '[PREPARE Ollama] criando $(OLLAMA_MODEL_NAME) para a matriz GGUF; nenhum download sera feito'
+	"$(PYTHON)" scripts/prepare_ollama.py --binary "$(OLLAMA_BIN)" --model "$(OLLAMA_MODEL_NAME)" \
+		--gguf "$(GGUF_FILE)" --context "$(GGUF_COMPARISON_CONTEXT)" \
+		--base-url "$$($(PYTHON) -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_url"])' "$(OLLAMA_CONFIG)")" \
+		--results "$(GGUF_COMPARISON_RESULTS)"
+
+gguf-smoke-vllm: prepare-vllm
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run --config "$(VLLM_CONFIG)" --local-model-path "$(VLLM_MODEL_DIR)" \
+		--launch "$(VLLM_LAUNCH)" --launch-executable "$(VLLM_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("VLLM_EXTRA_ARGS", ""))))')" \
+		--smoke --scenarios short --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--result-name "gguf-$(GGUF_VARIANT)-smoke" --results "$(GGUF_COMPARISON_RESULTS)"
+
+gguf-smoke-llama: prepare-llama
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
+	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run --config "$(LLAMA_CONFIG)" --local-model-path "$(LLAMA_MODEL_DIR)" \
+		--launch "$(LLAMA_LAUNCH)" --launch-executable "$(LLAMA_SERVER_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("LLAMA_EXTRA_ARGS", ""))))')" \
+		--smoke --scenarios short --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--result-name "gguf-$(GGUF_VARIANT)-smoke" --results "$(GGUF_COMPARISON_RESULTS)"
+
+gguf-smoke-ollama: gguf-prepare-ollama
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run --config "$(OLLAMA_CONFIG)" --local-model-path "$(OLLAMA_MODEL_DIR)" \
+		--launch "$(OLLAMA_LAUNCH)" --launch-executable "$(OLLAMA_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" \
+		--smoke --scenarios short --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--result-name "gguf-$(GGUF_VARIANT)-smoke" --results "$(GGUF_COMPARISON_RESULTS)"
+
+# Bateria formal da matriz: somente o benchmark base. O KV sweep permanece nos
+# targets bench-* do Makefile principal e não é misturado a estas nove células.
+gguf-base-vllm: prepare-vllm
+	@test -n "$(GGUF_VARIANT)" || { echo 'GGUF_VARIANT ausente' >&2; exit 1; }
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run \
+		--config "$(VLLM_CONFIG)" --local-model-path "$(VLLM_MODEL_DIR)" \
+		--launch "$(VLLM_LAUNCH)" --launch-executable "$(VLLM_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("VLLM_EXTRA_ARGS", ""))))')" \
+		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
+		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
+		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
+		--warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
+		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--result-name "$(GGUF_RESULT_NAME)" --results "$(GGUF_COMPARISON_RESULTS)"
+
+gguf-base-llama: prepare-llama
+	@test -n "$(GGUF_VARIANT)" || { echo 'GGUF_VARIANT ausente' >&2; exit 1; }
+	backend='$(LLAMA_BACKEND_PATH)'; if test -n "$$backend"; then export GGML_BACKEND_PATH="$$backend"; export LD_LIBRARY_PATH="$$(dirname "$$backend"):$${LD_LIBRARY_PATH:-}"; fi
+	PATH="$(dir $(LLAMA_SERVER_BIN)):$${PATH}" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run \
+		--config "$(LLAMA_CONFIG)" --local-model-path "$(LLAMA_MODEL_DIR)" \
+		--launch "$(LLAMA_LAUNCH)" --launch-executable "$(LLAMA_SERVER_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("LLAMA_EXTRA_ARGS", ""))))')" \
+		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
+		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
+		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
+		--warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
+		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--result-name "$(GGUF_RESULT_NAME)" --results "$(GGUF_COMPARISON_RESULTS)"
+
+gguf-base-ollama: gguf-prepare-ollama
+	@test -n "$(GGUF_VARIANT)" || { echo 'GGUF_VARIANT ausente' >&2; exit 1; }
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_ENABLE_HF_TRANSFER=0 \
+		$(PYTHON) bench.py run \
+		--config "$(OLLAMA_CONFIG)" --local-model-path "$(OLLAMA_MODEL_DIR)" \
+		--launch "$(OLLAMA_LAUNCH)" --launch-executable "$(OLLAMA_BIN)" \
+		--launch-extra-args-json "$$($(SYSTEM_PYTHON) -c 'import json,os,shlex; print(json.dumps(shlex.split(os.environ.get("OLLAMA_EXTRA_ARGS", ""))))')" \
+		--scenarios $(BENCH_SCENARIOS) --requests "$(BENCH_REQUESTS)" \
+		--repetitions "$(BENCH_REPETITIONS)" --warmup "$(BENCH_WARMUP)" \
+		--mode "$(BENCH_MODE)" --conversation-turns "$(CONVERSATION_TURNS)" \
+		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
+		--warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \
+		--collect-kv-metrics --startup-timeout "$(BENCH_STARTUP_TIMEOUT)" \
+		--result-name "$(GGUF_RESULT_NAME)" --results "$(GGUF_COMPARISON_RESULTS)"
