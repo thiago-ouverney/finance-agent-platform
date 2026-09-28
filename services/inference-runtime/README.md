@@ -101,6 +101,20 @@ com vLLM. Para comparar vLLM, llama.cpp e Ollama, use
 `OBS_RUNTIME=vllm|llama|ollama`.
 Downloads e instalação são preparação, não medição.
 
+Para validar e medir os três runtimes em sequência com o mesmo GGUF:
+
+```bash
+make observe-bench-all \
+  OBS_MODEL_SOURCE=gguf \
+  OBS_MODEL='<organizacao/repositorio>' \
+  OBS_REVISION='<revisao-ou-commit>' \
+  OBS_GGUF_FILENAME='<modelo>.gguf' \
+  OBS_TOKENIZER_MODEL='<organizacao/tokenizer>'
+```
+
+O alvo termina os três smokes antes de iniciar as três baterias completas. Uma
+falha interrompe a campanha; execuções concluídas permanecem em `results/`.
+
 A carga é configurada por `OBS_BENCH_SCENARIOS`, `OBS_BENCH_REQUESTS`,
 `OBS_BENCH_REPETITIONS`, `OBS_BENCH_WARMUP` e `OBS_BENCH_MODE`. O diretório
 raiz pode ser alterado com `OBS_RESULTS_DIR`.

@@ -266,6 +266,14 @@ pacote portátil com requisições, eventos, amostras e agregações por fase. O
 pacote é baixado com `make pull-observe-results` e analisado localmente com
 `make observability-dataset` e `make observability-notebook`.
 
+Na análise offline, cada runtime usa um `run_id` explícito e mantém sua própria
+conclusão. A comparação só é exibida quando as três runs compartilham a mesma
+identidade experimental e as mesmas requisições pareadas.
+
+Para uma campanha GGUF completa, `make observe-bench-all` executa primeiro o
+smoke de vLLM, llama.cpp e Ollama. A bateria completa dos três só começa se os
+três smokes terminarem com sucesso.
+
 Checkpoint Hugging Face remoto ou local é suportado pelo vLLM. O mesmo GGUF
 remoto ou local pode ser usado nos três runtimes. Downloads não pertencem à
 janela medida; segredos, pesos e resultados brutos não são versionados.

@@ -768,15 +768,140 @@ class BuildObservabilityDatasetTests(unittest.TestCase):
             namespace = {"__name__": "observability_notebook_test"}
             environment = {
                 "OBSERVABILITY_DATASET_DIR": str(dataset_dir),
+                "OBSERVABILITY_RUN_ID_VLLM": "exp-local",
+                "OBSERVABILITY_RUN_ID_LLAMA": "",
+                "OBSERVABILITY_RUN_ID_OLLAMA": "",
                 "MPLCONFIGDIR": str(root / "matplotlib"),
             }
             with warnings.catch_warnings(), patch.dict("os.environ", environment), patch(
                 "IPython.display.display", lambda *_args, **_kwargs: None
             ), patch("builtins.print"):
-                warnings.simplefilter("ignore", PendingDeprecationWarning)
+                warnings.simplefilter("ignore")
                 for cell in notebook["cells"]:
                     if cell["cell_type"] == "code":
                         exec("".join(cell["source"]), namespace)
+            self.assertTrue(namespace["vllm"]["ready"])
+            self.assertEqual(namespace["delivery_vllm"].loc[0, "total"], 2)
+            self.assertEqual(namespace["delivery_vllm"].loc[0, "ttft_p50_ms"], 200.0)
+            self.assertFalse(namespace["comparison_gate"]["comparable"])
+
+            labels = {"vllm": "vLLM", "llama": "llama.cpp", "ollama": "Ollama"}
+            runtime_results = {}
+            for runtime_key, runtime_label in labels.items():
+                actual_runtime = "llama.cpp" if runtime_key == "llama" else runtime_key
+                run_id = f"run-{runtime_key}"
+                requests = pd.DataFrame(
+                    [
+                        {
+                            "source_run_id": run_id,
+                            "request_uid": f"{run_id}:{index}",
+                            "benchmark_phase": "measure",
+                            "scenario": scenario,
+                            "status": "successful",
+                            "request_sha256": f"sha-{scenario}",
+                            "time_to_first_token_ms": 100.0,
+                            "decode_tokens_per_second": 20.0,
+                            "end_to_end_latency_seconds": 1.0,
+                        }
+                        for index, scenario in enumerate(["short", "medium", "long"], 1)
+                    ]
+                )
+                runtime_results[runtime_key] = {
+                    "runtime_key": runtime_key,
+                    "label": runtime_label,
+                    "run_id": run_id,
+                    "configured": True,
+                    "found": True,
+                    "ready": True,
+                    "issues": [],
+                    "identity": pd.Series(
+                        {
+                            "runtime": actual_runtime,
+                            "comparison_id": "comparison-123",
+                            "comparison_identity_complete": True,
+                            "model_sha256": MODEL_SHA,
+                            "tokenizer_sha256": TOKENIZER_SHA,
+                            "context_window": 8192,
+                            "output_tokens": 256,
+                        }
+                    ),
+                    "requests": requests,
+                }
+            namespace["tables"]["groups"] = pd.DataFrame(
+                [{"comparison_id": "comparison-123", "runtime_count": 3, "cross_runtime_ready": True}]
+            )
+            synthetic_gate = namespace["build_comparability"](runtime_results)
+            self.assertTrue(synthetic_gate["comparable"])
+            self.assertTrue(synthetic_gate["pairing_verified"])
+
+            performance_rows = []
+            resource_rows = []
+            energy_rows = []
+            for runtime_index, (runtime_key, runtime_label) in enumerate(labels.items()):
+                for scenario_index, scenario in enumerate(["short", "medium", "long"]):
+                    performance_rows.append(
+                        {
+                            "runtime_key": runtime_key,
+                            "runtime": runtime_label,
+                            "scenario": scenario,
+                            "total": 2,
+                            "successful": 2,
+                            "failed": 0,
+                            "success_rate_pct": 100.0,
+                            "prompt_tokens_p50": 256 * (scenario_index + 1),
+                            "completion_tokens_p50": 128.0,
+                            "ttft_n": 2,
+                            "ttft_p50_ms": 80 + 20 * runtime_index + 100 * scenario_index,
+                            "ttft_p95_ms": 100 + 20 * runtime_index + 100 * scenario_index,
+                            "decode_n": 2,
+                            "decode_p05_tps": 30 - runtime_index - scenario_index,
+                            "decode_p50_tps": 32 - runtime_index - scenario_index,
+                            "decode_p95_tps": 34 - runtime_index - scenario_index,
+                            "e2e_n": 2,
+                            "e2e_p50_s": 1 + runtime_index / 10 + scenario_index,
+                            "e2e_p95_s": 1.2 + runtime_index / 10 + scenario_index,
+                        }
+                    )
+                    for metric, median, peak in [
+                        ("inference_gpu_utilization_ratio", 70 + runtime_index, 90 + runtime_index),
+                        ("inference_gpu_memory_used_bytes", 10 + runtime_index, 12 + runtime_index),
+                        ("inference_host_cpu_utilization_ratio", 20 + runtime_index, 30 + runtime_index),
+                        ("inference_host_memory_used_bytes", 24 + runtime_index, 28 + runtime_index),
+                    ]:
+                        resource_rows.append(
+                            {
+                                "runtime": runtime_label,
+                                "scenario": scenario,
+                                "observed_phase": "decode_observed",
+                                "metric": metric,
+                                "median": median,
+                                "peak": peak,
+                                "coverage": 1.0,
+                            }
+                        )
+                    for request_index in range(2):
+                        energy_rows.append(
+                            {
+                                "runtime": runtime_label,
+                                "scenario": scenario,
+                                "request_uid": f"{runtime_key}:{scenario}:{request_index}",
+                                "energy_j": 100 + 10 * runtime_index + request_index,
+                                "energy_j_per_token": 1 + runtime_index / 10,
+                            }
+                        )
+
+            performance = pd.DataFrame(performance_rows)
+            resources = pd.DataFrame(resource_rows)
+            energy = pd.DataFrame(energy_rows)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.assertIn("Resultado relativo", namespace["result_heatmap"](performance).to_html())
+                self.assertIn("Uso e pressão", namespace["resource_heatmap"](resources, performance).to_html())
+                self.assertEqual(len(namespace["slo_summary"](performance)), 3)
+                self.assertIn("Decisão", namespace["comparison_findings"](performance, resources, energy))
+                namespace["plot_comparison_performance"](performance)
+                namespace["plot_comparison_resources"](resources)
+                self.assertTrue(namespace["plot_energy_comparison"](energy, performance))
             namespace["plt"].close("all")
 
 

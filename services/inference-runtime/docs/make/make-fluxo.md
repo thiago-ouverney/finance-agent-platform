@@ -87,6 +87,11 @@ Os três templates seguem esse mesmo contrato: chamam `vllm`, `llama-server` e `
 6. associa as amostras às requisições e fases observadas;
 7. grava o dataset e encerra somente os processos que criou.
 
+`make observe-bench-all` aceita somente `gguf|local-gguf` e orquestra seis
+execuções sequenciais: smoke em vLLM, llama.cpp e Ollama, seguido das baterias
+completas na mesma ordem. A segunda etapa só começa se todos os smokes passarem;
+qualquer falha interrompe o alvo sem remover os pacotes já gerados.
+
 Exemplo com Hugging Face no vLLM:
 
 ```bash

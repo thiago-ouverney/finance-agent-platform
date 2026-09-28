@@ -113,23 +113,31 @@ avaliação exploratória isolada
 
 ### [`analyze_runtime_observability.ipynb`](../analytics/notebooks/analyze_runtime_observability.ipynb)
 
-- **Responsabilidade:** comparar localmente as distribuições de latência e as
-  métricas de recursos por requisição e fase de rodadas `observe-bench`.
+- **Responsabilidade:** analisar separadamente uma run de vLLM, uma de
+  llama.cpp e uma de Ollama e, depois, comparar as três quando o experimento
+  for controlado e pareado.
 - **Entradas:** pacotes baixados com `make pull-observe-results` e o dataset
   produzido por `make observability-dataset`.
 - **Integridade:** somente runs `complete` com os cinco CSVs obrigatórios, os
   dois manifestos e os hashes válidos entram nas tabelas comparativas; as
   demais permanecem em `run-inventory.csv` com o motivo da exclusão.
-- **Comparabilidade:** o notebook analisa um `comparison_id` por vez. Esse
-  fingerprint fixa artefato, tokenizer, contexto, saída, workload e hardware;
-  runtime e versão do runtime continuam sendo as variáveis comparadas. Use
-  `OBSERVABILITY_COMPARISON_ID` quando o consolidado tiver vários grupos.
+- **Seleção:** informe os três `run_id` na célula de configuração ou por
+  `OBSERVABILITY_RUN_ID_VLLM`, `OBSERVABILITY_RUN_ID_LLAMA` e
+  `OBSERVABILITY_RUN_ID_OLLAMA`. O notebook nunca escolhe automaticamente a
+  primeira run ou o primeiro grupo encontrado.
+- **Comparabilidade:** `comparison_id` é um gate, não um seletor. Heatmaps,
+  gráficos e conclusão comparativa só aparecem quando as três runs são
+  distintas, completas, íntegras, pertencem ao mesmo grupo e têm o mesmo
+  multiconjunto de `scenario + request_sha256`. O fingerprint fixa artefato,
+  tokenizer, contexto, saída, workload e hardware; runtime e versão continuam
+  sendo as variáveis comparadas.
 - **Tratamento efetivo:** `run-inventory.csv`, `complete-runs.csv` e o resumo
   expõem o `argv` e ambiente redigidos realmente usados, seus fingerprints,
   flags de cache com valores, estado de KV/prefix cache e residência do modelo.
   O comando genérico da configuração não é usado como prova do processo.
-- **Saídas:** tabelas e gráficos na sessão do notebook; os CSVs de origem não
-  são modificados.
+- **Saídas:** identidade, entrega, recursos, energia estimada, timeline e
+  conclusão de cada runtime; com o gate aprovado, tabela completa, heatmaps e
+  gráficos comparativos. Os CSVs de origem não são modificados.
 - **Comando:** na raiz local, `make observability-notebook`.
 - **Onde executa:** navegador e kernel na máquina local, sem túnel, runtime ou
   Prometheus ativos.

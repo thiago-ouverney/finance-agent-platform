@@ -97,6 +97,23 @@ Comparar vLLM/HF contra llama.cpp/GGUF muda runtime e formato simultaneamente.
 Use `OBS_TOKENIZER_MODEL` e `OBS_TOKENIZER_REVISION` quando precisar fixar um
 tokenizer diferente daquele inferido pelo modelo.
 
+Para executar a campanha inteira com um único comando, use:
+
+```bash
+make observe-bench-all \
+  OBS_MODEL_SOURCE=gguf \
+  OBS_MODEL='<organizacao/repositorio>' \
+  OBS_REVISION='<revisao-ou-commit>' \
+  OBS_GGUF_FILENAME='<modelo>.gguf' \
+  OBS_TOKENIZER_MODEL='<organizacao/tokenizer>'
+```
+
+O alvo executa os smokes na ordem vLLM, llama.cpp e Ollama. Somente depois que
+os três passam ele repete essa ordem com `OBS_BENCH_SMOKE=0` e a carga completa.
+Qualquer falha interrompe a campanha e preserva os resultados já produzidos.
+Para arquivo presente no Pod, troque por `OBS_MODEL_SOURCE=local-gguf` e informe
+o caminho absoluto em `OBS_MODEL`.
+
 O fluxo fixa por padrão `vllm==0.29.0`, o commit do plugin GGUF, um commit do
 llama.cpp e `OBS_OLLAMA_VERSION=0.34.0`. Sobrescreva somente com outra versão
 exata. A versão realmente executada, hashes dos binários e o `argv` efetivo ficam no manifesto;
@@ -207,12 +224,13 @@ conceitos separados. A ocupação do KV só aparece quando o runtime a expõe; n
 Para distribuições, a unidade estatística é a requisição. Os vários scrapes de
 uma mesma requisição são amostras correlacionadas, não novas repetições.
 
-Na consolidação local, uma run só entra no comparativo quando o status final é
-`complete`, todos os artefatos obrigatórios abrem corretamente e os hashes
-coincidem. As excluídas permanecem em `run-inventory.csv`. O
-`comparison_id` fixa modelo, tokenizer, contexto, saída, workload e hardware;
-runtime e versão do runtime permanecem como dimensões comparadas. O notebook
-nunca combina dois `comparison_id` no mesmo gráfico.
+Na consolidação local, uma run só entra nas tabelas elegíveis quando o status
+final é `complete`, todos os artefatos obrigatórios abrem corretamente e os
+hashes coincidem. As excluídas permanecem em `run-inventory.csv`; grupos
+distintos continuam preservados no mesmo dataset. O notebook recebe
+explicitamente um `run_id` de vLLM, um de llama.cpp e um de Ollama. O
+`comparison_id` fixa modelo, tokenizer, contexto, saída, workload e hardware e
+é usado como gate: grupos incompatíveis nunca aparecem no mesmo gráfico.
 
 O comparativo também mostra o `argv` e ambiente redigidos efetivamente usados,
 seus fingerprints, flags de cache com valores, estado do KV/prefix cache e
@@ -245,9 +263,15 @@ make observability-notebook
 ```
 
 `setup-notebook` só é necessário na primeira vez. O alvo de dataset consolida
-somente execuções compatíveis. O último abre o notebook
-de análise com **kernel local** e lê os CSVs já baixados; não precisa de túnel,
-runtime nem Prometheus ativos.
+as execuções válidas e mantém grupos incompatíveis separados. O último abre o
+notebook de análise com **kernel local** e lê os CSVs já baixados; não precisa
+de túnel, runtime nem Prometheus ativos.
+
+Na primeira célula, preencha `RUN_IDS` com as três execuções formais. Como
+alternativa, defina `OBSERVABILITY_RUN_ID_VLLM`,
+`OBSERVABILITY_RUN_ID_LLAMA` e `OBSERVABILITY_RUN_ID_OLLAMA`. Cada seção
+individual funciona isoladamente; a consolidação só é liberada quando as três
+runs compartilham a identidade experimental e o pareamento das requisições.
 
 ## 6. Faça a comparação
 
@@ -257,6 +281,13 @@ Para cada runtime e cenário, reporte:
 - CPU, GPU, RAM, VRAM, swap, disco e page faults por fase;
 - ocupação do pool KV quando o runtime expuser a métrica;
 - falhas, valores ausentes e configuração registrada no manifesto.
+
+Depois das três leituras individuais, use a tabela completa e apenas quatro
+eixos executivos: sucesso, TTFT p95, decode p05 e E2E p95. O heatmap de
+recursos é neutro — maior uso não significa melhor runtime — e deve mostrar a
+cobertura junto do valor. Os gráficos comparativos ficam limitados a entrega,
+pressão de recursos e energia quando houver cobertura suficiente. Não gere
+score composto.
 
 Localize um gargalo, altere uma variável por vez e repita a mesma carga. Compare
 antes e depois; uma única requisição ou um gráfico isolado não sustenta uma

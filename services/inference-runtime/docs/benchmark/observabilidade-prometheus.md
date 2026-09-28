@@ -202,11 +202,11 @@ o alvo deixa `ssh`/`scp` resolverem porta e identidade pelo alias em
 `dataset-manifest.json`, o `manifest.json` final e seus hashes. Run completa
 com artefato ausente, malformado ou alterado fica somente no inventário.
 
-Cada tabela comparativa recebe um `comparison_id` calculado com SHA do modelo
-e tokenizer, contexto, limite de saída, workload, modo e hardware. Runtime e
+Cada tabela elegível recebe um `comparison_id` calculado com SHA do modelo e
+tokenizer, contexto, limite de saída, workload, modo e hardware. Runtime e
 versão do runtime são a variável comparada e não entram no fingerprint. O
-notebook filtra um grupo por vez, portanto configurações incompatíveis não são
-agregadas silenciosamente.
+notebook seleciona explicitamente um `run_id` de cada runtime; `comparison_id`
+é o gate que impede configurações incompatíveis de serem agregadas.
 
 O inventário e o resumo expõem o `argv` e ambiente redigidos efetivamente
 usados, seus fingerprints, flags de cache com valores, estado de KV/prefix
@@ -216,6 +216,11 @@ cache e residência do modelo. Eles são dimensões do runtime; o
 O notebook usa kernel local e os CSVs já baixados; runtime, Prometheus e túnel
 de Jupyter podem estar desligados. Use `OBS_REMOTE_RESULTS_DIR` e
 `OBS_LOCAL_RESULTS_DIR` para sobrescrever os diretórios de origem e destino.
+Configure as três runs na célula `RUN_IDS` ou por
+`OBSERVABILITY_RUN_ID_VLLM`, `OBSERVABILITY_RUN_ID_LLAMA` e
+`OBSERVABILITY_RUN_ID_OLLAMA`. A comparação exige três IDs distintos, runs
+completas e íntegras, um único `comparison_id`, grupo com três runtimes e
+pareamento por `scenario + request_sha256`.
 
 ## Perfil interativo
 

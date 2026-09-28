@@ -99,7 +99,7 @@ OBS_OLLAMA_ENV = OLLAMA_MODELS="$(OBS_OLLAMA_MODELS)" OLLAMA_KEEP_ALIVE="$(OBS_O
 	observe-serve observe-serve-vllm observe-serve-llama observe-serve-ollama \
 	observe-prometheus-start observe-prometheus-stop observe-status \
 	observe-notebook-install observe-jupyter observe-model-prepare observe-render-runtime \
-	observe-prepare-headless-ollama observe-bench-prepare observe-bench pull-observe-results
+	observe-prepare-headless-ollama observe-bench-prepare observe-bench observe-bench-all pull-observe-results
 
 observe-help:
 	@printf '%s\n' \
@@ -113,6 +113,7 @@ observe-help:
 		'  make observe-status OBS_RUNTIME=vllm           verifica APIs' \
 		'  make observe-prometheus-stop                   encerra a coleta' \
 		'  make observe-bench OBS_RUNTIME=vllm            roda bateria CLI + Prometheus' \
+		'  make observe-bench-all OBS_MODEL_SOURCE=gguf    smoke e bateria completa nos 3 runtimes' \
 		'  make pull-observe-results OBS_REMOTE_HOST=alias baixa e verifica resultados' \
 		'' \
 		'Padrão RTX 3090: Qwen2.5-7B HF, contexto 8192, uma sequência, 90% da VRAM.' \
@@ -424,6 +425,24 @@ observe-bench: observe-bench-prepare
 		--results "$(OBS_RESULTS_DIR)" $(if $(strip $(OBS_RESULT_NAME)),--result-name "$(OBS_RESULT_NAME)") \
 		$(if $(filter 1,$(OBS_BENCH_SMOKE)),--smoke) --disable-native-monitor \
 		--prometheus-url "$(OBS_PROMETHEUS_URL)" --prometheus-step "$(PROMETHEUS_SCRAPE_INTERVAL)"
+
+observe-bench-all:
+	@case "$(OBS_MODEL_SOURCE)" in \
+		gguf|local-gguf) ;; \
+		*) echo 'observe-bench-all exige OBS_MODEL_SOURCE=gguf ou local-gguf.' >&2; exit 2 ;; \
+	esac
+	@test -n "$(OBS_MODEL)" || { echo 'Informe OBS_MODEL com repo HF de um GGUF ou caminho local.' >&2; exit 2; }
+	@printf '%s\n' '[CAMPAIGN] etapa 1/2: smoke em vLLM, llama.cpp e Ollama'
+	@for runtime in vllm llama ollama; do \
+		printf '[CAMPAIGN] smoke: %s\n' "$$runtime"; \
+		$(MAKE) --no-print-directory observe-bench OBS_RUNTIME="$$runtime" OBS_BENCH_SMOKE=1; \
+	done
+	@printf '%s\n' '[CAMPAIGN] etapa 2/2: bateria completa em vLLM, llama.cpp e Ollama'
+	@for runtime in vllm llama ollama; do \
+		printf '[CAMPAIGN] completo: %s\n' "$$runtime"; \
+		$(MAKE) --no-print-directory observe-bench OBS_RUNTIME="$$runtime" OBS_BENCH_SMOKE=0; \
+	done
+	@printf '%s\n' '[CAMPAIGN] concluída: 3 smokes e 3 baterias completas'
 
 pull-observe-results: POD_SSH = $(OBS_REMOTE_HOST)
 pull-observe-results: POD_PORT = $(OBS_REMOTE_PORT)

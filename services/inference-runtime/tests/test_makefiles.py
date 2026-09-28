@@ -148,6 +148,61 @@ class MakefileRegressionTests(unittest.TestCase):
         self.assertIn('scp_port_args=(-P "22022")', result.stdout)
         self.assertIn('ssh_key_args=(-i "/tmp/runpod-test-key")', result.stdout)
 
+    def test_observe_bench_all_runs_smokes_before_full_campaign(self):
+        self.require_oneshell()
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            calls_path = temp / "make-calls.jsonl"
+            fake_make = temp / "make"
+            fake_make.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "with open(os.environ['MAKE_CALLS'], 'a') as stream:\n"
+                "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            )
+            fake_make.chmod(0o755)
+            env = os.environ.copy()
+            env["MAKE_CALLS"] = str(calls_path)
+            result = subprocess.run(
+                [
+                    "make", "observe-bench-all", f"MAKE={fake_make}",
+                    "OBS_MODEL_SOURCE=local-gguf", "OBS_MODEL=/workspace/model.gguf",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+            self.assertEqual(len(calls), 6)
+            observed = []
+            for call in calls:
+                self.assertIn("observe-bench", call)
+                runtime = next(value.split("=", 1)[1] for value in call
+                               if value.startswith("OBS_RUNTIME="))
+                smoke = next(value.split("=", 1)[1] for value in call
+                             if value.startswith("OBS_BENCH_SMOKE="))
+                observed.append((runtime, smoke))
+            self.assertEqual(observed, [
+                ("vllm", "1"), ("llama", "1"), ("ollama", "1"),
+                ("vllm", "0"), ("llama", "0"), ("ollama", "0"),
+            ])
+
+    def test_observe_bench_all_rejects_non_gguf_source(self):
+        self.require_oneshell()
+        result = subprocess.run(
+            [
+                "make", "observe-bench-all",
+                "OBS_MODEL_SOURCE=hf", "OBS_MODEL=Qwen/Qwen2.5-7B-Instruct",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exige OBS_MODEL_SOURCE=gguf ou local-gguf", result.stderr)
+
 
 class _ProfilingWrapperMixin:
     def run_wrapper(self, wrapper, profiler):
