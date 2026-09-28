@@ -1,5 +1,8 @@
 # Bench explicado
 
+> **Objetivo:** explicar, em linguagem direta, o que o benchmark mede, como ele
+> executa e quais conclusões seus resultados permitem.
+
 ## A ideia em uma frase
 
 O benchmark mede a experiência de **uma pessoa usando um chatbot**, uma requisição por vez, observando o servidor por HTTP/SSE e registrando latência, tokens, memória e utilização da GPU.
@@ -261,7 +264,12 @@ O warmup não limpa caches, não prova estabilidade e não entra na fase `measur
 
 Na fase `measure`, o cliente envia uma requisição por vez. Para cada resposta bem-sucedida calcula TTFT, intervalo entre tokens, tokens/s de decode, tokens/s efetivos e latência total. A bateria formal padrão usa 50 perguntas variadas em `replay`, uma repetição e três warmups com fixture separada por cenário.
 
-`short`, `medium` e `long` representam aproximadamente 256, 2048 e 8192 tokens de entrada, com teto de 128 tokens de saída. O servidor informa os comprimentos reais; esses valores devem ser conferidos antes da comparação.
+`short`, `medium` e `long` representam alvos de 256, 2048 e 7680 tokens de
+entrada, com teto de 128 tokens de saída. No `replay`, o alvo considera o prompt
+completo: o cliente seleciona o histórico fixo mais próximo, remove pares
+antigos acima do alvo e adiciona contexto sintético determinístico abaixo dele.
+O servidor informa `usage.prompt_tokens`; essa contagem real deve ser usada na
+comparação, mantendo a estimativa como diagnóstico.
 
 ### 6. Referência final e cleanup
 

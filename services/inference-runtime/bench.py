@@ -23,9 +23,12 @@ from urllib.parse import urlsplit
 from results_layout import artifact, execution_label, href, locate, prepare, runtime_root, slug
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 GUIDELLM_VERSION = "0.7.4"
-WORKLOADS = {"short": 256, "medium": 2048, "long": 8192}
+# Alvos de entrada. ``long`` deixa 512 tokens no contexto padrão de 8192:
+# 128 para saída e 384 para template/margem de segurança.
+NAMED_WORKLOADS = {"short": 256, "medium": 2048, "long": 7680}
+WORKLOADS = dict(NAMED_WORKLOADS)
 OUTPUT_TOKENS = 128
 DEFAULT_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat_bench_v2.json"
 DEFAULT_WARMUP_CONVERSATION_FIXTURE = ROOT / "workloads" / "conversations" / "qwen_chat_warmup_v1.json"
@@ -74,6 +77,7 @@ def stream_messages_request(cfg, messages, timeout, secret="", max_tokens=OUTPUT
     body = {"model": cfg["model"], "messages": messages,
             "temperature": 0, "top_p": 1, "max_tokens": max_tokens,
             "stream": True, "stream_options": {"include_usage": True}}
+    started_epoch = time.time()
     started = time.perf_counter()
     first = last = None
     chunks = 0
@@ -104,8 +108,15 @@ def stream_messages_request(cfg, messages, timeout, secret="", max_tokens=OUTPUT
                     chunks += 1
                     content += text
     ended = time.perf_counter()
+    ended_epoch = started_epoch + (ended - started)
     e2e = ended - started
     metrics = stream_metrics(started, first, last, ended, usage)
+    metrics.update({
+        "request_start_epoch_s": started_epoch,
+        "first_content_epoch_s": started_epoch + (first - started) if first is not None else None,
+        "last_content_epoch_s": started_epoch + (last - started) if last is not None else None,
+        "request_end_epoch_s": ended_epoch,
+    })
     metadata = dict(metadata or {})
     if "history_tokens_estimate" in metadata:
         metadata["history_tokens"] = metrics["prompt_tokens"] if metrics["prompt_tokens"] is not None else metadata["history_tokens_estimate"]
@@ -132,7 +143,8 @@ def stream_metrics(request_start_time, first_token_time, last_token_time, reques
     decode = completion / generation if completion is not None and generation and generation > 0 else None
     effective = completion / e2e if completion is not None and e2e > 0 else None
     return {"request_start_time": request_start_time, "first_token_time": first_token_time,
-            "request_end_time": request_end_time, "time_to_first_token_seconds": ttft,
+            "last_token_time": last_token_time, "request_end_time": request_end_time,
+            "time_to_first_token_seconds": ttft,
             "generation_time_seconds": generation, "end_to_end_latency_seconds": e2e,
             "completion_tokens": completion, "prompt_tokens": prompt_tokens, "total_tokens": total,
             "decode_tokens_per_second": decode, "end_to_end_tokens_per_second": effective,
@@ -202,6 +214,159 @@ def fixture_messages_for_turn(fixture, turn_index, prior_assistant_outputs, loop
     return messages
 
 
+def _rank_replay_turns(tokenizer, fixture, target_tokens, minimum_turn=1):
+    """Ordena turnos pelo histórico fixo mais próximo do alvo do cenário."""
+    ranked = []
+    for turn_index in range(minimum_turn, len(fixture["data"]["turns"]) + 1):
+        messages = fixture_messages_for_turn(fixture, turn_index, [], "replay")
+        estimate = estimate_messages_tokens(tokenizer, messages)
+        ranked.append((abs(estimate - target_tokens), estimate > target_tokens,
+                       turn_index, estimate))
+    ranked.sort()
+    return [turn_index for _distance, _over, turn_index, _estimate in ranked]
+
+
+def _trim_oldest_replay_pairs(tokenizer, messages, target_tokens):
+    """Remove pares user/assistant antigos, preservando system e user atual."""
+    trimmed = [dict(message) for message in messages]
+    dropped = 0
+    history_start = 1 if trimmed and trimmed[0].get("role") == "system" else 0
+    while estimate_messages_tokens(tokenizer, trimmed) > target_tokens:
+        # Um replay válido termina em user. Antes dele há pares user/assistant.
+        if len(trimmed) - history_start < 3:
+            break
+        if (trimmed[history_start].get("role") != "user"
+                or trimmed[history_start + 1].get("role") != "assistant"):
+            raise ValueError("Histórico replay inválido: esperado par user/assistant.")
+        del trimmed[history_start:history_start + 2]
+        dropped += 1
+    estimate = estimate_messages_tokens(tokenizer, trimmed)
+    if estimate > target_tokens:
+        raise ValueError(
+            f"O system prompt e o user atual usam {estimate} tokens estimados, "
+            f"acima do alvo {target_tokens}; não é possível truncar sem alterar a pergunta."
+        )
+    return trimmed, dropped, estimate
+
+
+def _pad_replay_messages(tokenizer, messages, target_tokens, seed):
+    """Adiciona contexto sintético determinístico até o maior valor <= alvo."""
+    base = [dict(message) for message in messages]
+    base_estimate = estimate_messages_tokens(tokenizer, base)
+    if base_estimate >= target_tokens:
+        return base, 0, base_estimate
+    if not base or base[0].get("role") != "system":
+        raise ValueError("Fixture replay precisa começar com system para receber contexto sintético.")
+
+    # Gera uma única sequência grande. O binary search só recorta e decodifica,
+    # evitando reconstruir milhares de tokens em cada tentativa.
+    filler = _synthetic_prompt(tokenizer, target_tokens, seed)
+    filler_ids = tokenizer.encode(filler, add_special_tokens=False)
+    original_system = base[0]["content"]
+    heading = "\n\nContexto sintético determinístico do benchmark:\n"
+
+    def candidate(filler_tokens):
+        rendered = [dict(message) for message in base]
+        if filler_tokens:
+            rendered[0]["content"] = (
+                original_system + heading
+                + tokenizer.decode(filler_ids[:filler_tokens], skip_special_tokens=False)
+            )
+        return rendered, estimate_messages_tokens(tokenizer, rendered)
+
+    best_messages, best_tokens, best_estimate = base, 0, base_estimate
+    low, high = 1, len(filler_ids)
+    while low <= high:
+        middle = (low + high) // 2
+        rendered, estimate = candidate(middle)
+        if estimate <= target_tokens:
+            if estimate > best_estimate:
+                best_messages, best_tokens, best_estimate = rendered, middle, estimate
+            low = middle + 1
+        else:
+            high = middle - 1
+
+    # Tokenização na fronteira texto/texto pode não ser perfeitamente monótona.
+    # Uma pequena busca local torna a escolha estável sem ultrapassar o alvo.
+    for filler_tokens in range(max(1, high - 8), min(len(filler_ids), low + 8) + 1):
+        rendered, estimate = candidate(filler_tokens)
+        if best_estimate < estimate <= target_tokens:
+            best_messages, best_tokens, best_estimate = rendered, filler_tokens, estimate
+    return best_messages, best_tokens, best_estimate
+
+
+def _target_replay_messages(tokenizer, fixture, turn_index, target_tokens, seed):
+    raw = fixture_messages_for_turn(fixture, turn_index, [], "replay")
+    raw_estimate = estimate_messages_tokens(tokenizer, raw)
+    trimmed, dropped, _trimmed_estimate = _trim_oldest_replay_pairs(
+        tokenizer, raw, target_tokens
+    )
+    messages, filler_tokens, estimate = _pad_replay_messages(
+        tokenizer, trimmed, target_tokens, seed
+    )
+    return messages, {
+        "fixture_history_tokens_estimate": raw_estimate,
+        "history_pairs_dropped": dropped,
+        "synthetic_context_tokens": filler_tokens,
+        "history_tokens_estimate": estimate,
+        "target_delta_tokens_estimate": target_tokens - estimate,
+        "history_selection_policy": (
+            "nearest fixture history; drop oldest complete pairs above target; "
+            "deterministic system-context padding below target"
+        ),
+    }
+
+
+def workload_contract(scenarios, mode):
+    """Contrato serializável usado no manifesto e nos configs de cada bloco."""
+    targets = {name: WORKLOADS[name] for name in scenarios}
+    semantics = {}
+    for name in scenarios:
+        if mode == "independent":
+            semantics[name] = "synthetic user-content tokens before chat template"
+        elif mode == "replay" and name in NAMED_WORKLOADS:
+            semantics[name] = (
+                "estimated complete chat prompt tokens; nearest fixed fixture history, "
+                "oldest-pair truncation and deterministic system-context padding"
+            )
+        elif mode == "replay":
+            semantics[name] = (
+                "maximum estimated complete chat prompt tokens; fixed fixture histories "
+                "that fit, without target padding"
+            )
+        else:
+            semantics[name] = (
+                "reference ceiling; complete chat prompt evolves from real assistant outputs"
+            )
+    if mode == "independent":
+        policy = "deterministic unique synthetic user prompt per request"
+    elif mode == "replay" and any(name in NAMED_WORKLOADS for name in scenarios):
+        policy = (
+            "fixed replay fixture selected near each named token target; deterministic "
+            "truncation/padding; server usage.prompt_tokens is authoritative"
+        )
+    elif mode == "replay":
+        policy = "fixed replay fixture histories filtered by the requested context ceiling"
+    else:
+        policy = "closed-loop fixture with real assistant outputs accumulated in history"
+    contract = {
+        "schema_version": 1,
+        "mode": mode,
+        "named_scenario_defaults": dict(NAMED_WORKLOADS),
+        "input_token_targets": targets,
+        "input_token_target_semantics": semantics,
+        "output_token_ceiling": OUTPUT_TOKENS,
+        "prompt_policy": policy,
+        "prompt_tokens_authority": (
+            "OpenAI-compatible usage.prompt_tokens; null when the runtime omits usage"
+        ),
+    }
+    contract["sha256"] = hashlib.sha256(
+        json.dumps(contract, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+    return contract
+
+
 def run_conversational_batch(cfg, tokenizer, scenario, conversations, turns, timeout, secret="", fixture=None, loop_mode="closed-loop"):
     if fixture is None:
         fixture = load_conversation_fixture(DEFAULT_CONVERSATION_FIXTURE)
@@ -211,7 +376,11 @@ def run_conversational_batch(cfg, tokenizer, scenario, conversations, turns, tim
     target = WORKLOADS[scenario]
     successful, errored = [], []
     available_turns = max(1, len(fixture["data"]["turns"]) - turns + 1)
-    if turns == 1 and scenario.startswith("ctx"):
+    targeted_replay = loop_mode == "replay" and scenario in NAMED_WORKLOADS
+    if targeted_replay:
+        fitting_turns = _rank_replay_turns(tokenizer, fixture, target, turns)
+        available_turns = len(fitting_turns)
+    elif turns == 1 and scenario.startswith("ctx"):
         fitting_turns = []
         for candidate in range(1, available_turns + 1):
             candidate_messages = fixture_messages_for_turn(fixture, candidate, [], loop_mode)
@@ -227,19 +396,26 @@ def run_conversational_batch(cfg, tokenizer, scenario, conversations, turns, tim
         # Com turns=1, percorremos a fixture em vez de repetir sempre a primeira
         # pergunta. Cada request continua sendo uma conversa nova e determinística,
         # mas pode carregar um histórico de tamanho diferente.
-        if turns == 1:
+        if turns == 1 or targeted_replay:
             final_turn = fitting_turns[(conversation_index - 1) % available_turns]
         else:
             final_turn = turns
         for turn_index in range(final_turn - turns + 1, final_turn + 1):
             messages = fixture_messages_for_turn(fixture, turn_index, assistant_outputs, loop_mode)
+            targeting = {}
+            if targeted_replay:
+                messages, targeting = _target_replay_messages(
+                    tokenizer, fixture, turn_index, target,
+                    f"{fixture['sha256']}:{scenario}:{conversation_index}:{turn_index}",
+                )
             estimate = estimate_messages_tokens(tokenizer, messages)
             metadata = {"mode": loop_mode, "conversation_index": conversation_index,
                         "fixture_sha256": fixture["sha256"],
                         "fixture_name": fixture["data"].get("name"),
                         "turn_index": turn_index, "history_tokens_estimate": estimate,
                         "target_history_tokens": target, "messages_count": len(messages),
-                        "request_id": f"{scenario}-c{conversation_index}-t{turn_index}"}
+                        "request_id": f"{scenario}-c{conversation_index}-t{turn_index}",
+                        **targeting}
             try:
                 row = stream_messages_request(cfg, messages, timeout, secret, metadata=metadata)
                 row["status"] = "successful"
@@ -278,15 +454,108 @@ def write_json(path, data):
     Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+_SENSITIVE_NAMES = {
+    "api_key", "authorization", "access_token", "auth_token", "hf_token",
+    "password", "secret", "token",
+}
+
+
+def _sensitive_name(value):
+    normalized = str(value).strip().lower().lstrip("-").replace("-", "_")
+    return normalized in _SENSITIVE_NAMES
+
+
+def reject_sensitive_argv(values):
+    for value in values or []:
+        key = value.partition("=")[0] if isinstance(value, str) else value
+        if _sensitive_name(key):
+            raise ValueError(
+                "Segredos não podem ser passados em --launch-extra-args; "
+                "o benchmark usa loopback e não persiste credenciais de servidor."
+            )
+
+
 def redact(value, secret):
     if isinstance(value, dict):
-        return {k: ("[REDACTED]" if k.lower() in {"api_key", "authorization"} else redact(v, secret))
+        return {k: ("[REDACTED]" if _sensitive_name(k) else redact(v, secret))
                 for k, v in value.items()}
     if isinstance(value, list):
-        return [redact(v, secret) for v in value]
+        result = []
+        redact_next = False
+        for item in value:
+            if redact_next:
+                result.append("[REDACTED]")
+                redact_next = False
+                continue
+            if isinstance(item, str):
+                key, separator, _raw = item.partition("=")
+                if separator and _sensitive_name(key):
+                    result.append(f"{key}=[REDACTED]")
+                    continue
+                if _sensitive_name(item):
+                    result.append(item)
+                    redact_next = True
+                    continue
+            result.append(redact(item, secret))
+        return result
     if isinstance(value, str) and secret:
         return value.replace(secret, "[REDACTED]")
     return value
+
+
+def sanitize_model_identity(value, secret=""):
+    """Aceita somente o contrato público do preparador; campos extras não vazam."""
+    if not isinstance(value, dict):
+        raise ValueError("--model-metadata deve conter um objeto JSON")
+
+    def file_records(records):
+        if not isinstance(records, list):
+            return []
+        return [
+            {key: record.get(key) for key in ("path", "bytes", "sha256")}
+            for record in records if isinstance(record, dict)
+        ]
+
+    top_fields = (
+        "schema_version", "prepared_at_utc", "source", "runtime",
+        "requested_model", "model", "requested_revision", "resolved_revision",
+        "gguf_filename", "local_path", "tokenizer_path", "requested_tokenizer",
+        "requested_tokenizer_revision", "resolved_tokenizer_revision", "bytes", "sha256",
+    )
+    result = {key: value.get(key) for key in top_fields if key in value}
+    if isinstance(value.get("paths"), dict):
+        result["paths"] = {
+            key: value["paths"].get(key) for key in ("model", "tokenizer")
+            if key in value["paths"]
+        }
+    if isinstance(value.get("artifact"), dict):
+        artifact_identity = value["artifact"]
+        result["artifact"] = {
+            key: artifact_identity.get(key)
+            for key in ("kind", "bytes", "sha256", "signature")
+            if key in artifact_identity
+        }
+        result["artifact"]["files"] = file_records(artifact_identity.get("files"))
+    if isinstance(value.get("tokenizer"), dict):
+        tokenizer_identity = value["tokenizer"]
+        result["tokenizer"] = {
+            key: tokenizer_identity.get(key)
+            for key in (
+                "present", "path", "bytes", "sha256", "source", "requested_model",
+                "requested_revision", "resolved_revision",
+            )
+            if key in tokenizer_identity
+        }
+        result["tokenizer"]["files"] = file_records(tokenizer_identity.get("files"))
+    if not isinstance(result.get("local_path"), str) or not result["local_path"].strip():
+        raise ValueError("--model-metadata não contém local_path válido")
+    for environment_secret in (
+        secret,
+        os.environ.get("HF_TOKEN", ""),
+        os.environ.get("HUGGING_FACE_HUB_TOKEN", ""),
+    ):
+        result = redact(result, environment_secret)
+    return result
 
 
 def capture(command):
@@ -295,6 +564,128 @@ def capture(command):
         return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"unavailable": str(exc)}
+
+
+def hardware_snapshot():
+    """Captura identidade estática suficiente para separar máquinas na análise."""
+    import psutil
+
+    cpu_model = platform.processor().strip()
+    try:
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+            if line.lower().startswith("model name"):
+                cpu_model = line.partition(":")[2].strip()
+                break
+    except OSError:
+        pass
+    def read_optional(path):
+        try:
+            return Path(path).read_text(encoding="utf-8").strip() or None
+        except OSError:
+            return None
+
+    affinity = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None
+    return {
+        "cpu_model": cpu_model or None,
+        "cpu_logical_count": psutil.cpu_count(logical=True),
+        "cpu_physical_count": psutil.cpu_count(logical=False),
+        "cpu_affinity": affinity,
+        "ram_total_bytes": psutil.virtual_memory().total,
+        "cgroup_cpu_max": read_optional("/sys/fs/cgroup/cpu.max"),
+        "cgroup_memory_max": read_optional("/sys/fs/cgroup/memory.max"),
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "gpu_inventory": capture([
+            "nvidia-smi",
+            "--query-gpu=index,name,uuid,memory.total,driver_version",
+            "--format=csv,noheader,nounits",
+        ]),
+    }
+
+
+def runtime_environment(cfg):
+    common = {"CUDA_VISIBLE_DEVICES"}
+    names = {
+        "vllm": common | {"VLLM_ATTENTION_BACKEND", "VLLM_WORKER_MULTIPROC_METHOD"},
+        "llama.cpp": common | {"GGML_CUDA_ENABLE_UNIFIED_MEMORY", "GGML_BACKEND_PATH"},
+        "ollama": common | {
+            "OLLAMA_KEEP_ALIVE", "OLLAMA_KV_CACHE_TYPE", "OLLAMA_FLASH_ATTENTION",
+            "OLLAMA_NUM_PARALLEL", "OLLAMA_MAX_LOADED_MODELS", "OLLAMA_MODELS",
+        },
+    }.get(cfg.get("runtime"), common)
+    return {name: os.environ[name] for name in sorted(names) if name in os.environ}
+
+
+def _cache_argv(arguments):
+    result = []
+    index = 0
+    while index < len(arguments):
+        value = arguments[index]
+        lowered = value.lower()
+        if ("cache" in lowered or "caching" in lowered
+                or "keepalive" in lowered or "keep-alive" in lowered):
+            sensitive = any(marker in lowered for marker in (
+                "api-key", "api_key", "authorization", "password", "secret", "token"
+            ))
+            if sensitive and "=" in value:
+                result.append(value.partition("=")[0] + "=[REDACTED]")
+                index += 1
+                continue
+            result.append(value)
+            if "=" not in value and index + 1 < len(arguments):
+                following = arguments[index + 1]
+                if not following.startswith("--"):
+                    result.append("[REDACTED]" if sensitive else following)
+                    index += 1
+        index += 1
+    return result
+
+
+def describe_cache_policy(cfg, argv, owns_runtime, environment=None):
+    """Separa KV, reutilização de prefixo e residência sem inferir uma métrica."""
+    arguments = [str(value) for value in (argv or [])]
+    lowered = [value.lower() for value in arguments]
+    environment = dict(environment or {})
+    if not owns_runtime:
+        prefix_state = "external-server-state-unknown"
+    elif "--enable-prefix-caching" in lowered:
+        prefix_state = "enabled-explicit-argv"
+    elif "--no-enable-prefix-caching" in lowered:
+        prefix_state = "disabled-explicit-argv"
+    elif any(value == "--cache-reuse" or value.startswith("--cache-reuse=")
+             for value in lowered):
+        prefix_state = "configured-by-cache-reuse-argv"
+    elif cfg.get("runtime") == "ollama":
+        prefix_state = "not-exposed-by-runtime-interface"
+    else:
+        prefix_state = "runtime-default-not-overridden"
+    kv_configuration = {
+        key: environment[key] for key in ("OLLAMA_KV_CACHE_TYPE", "OLLAMA_FLASH_ATTENTION")
+        if key in environment
+    }
+    cache_flags = _cache_argv(arguments)
+    prefix_flags = [value for value in cache_flags if (
+        "prefix" in value.lower() or "cache-reuse" in value.lower()
+    )]
+    keep_alive = environment.get("OLLAMA_KEEP_ALIVE")
+    return {
+        "declared": cfg.get("cache_policy"),
+        "process_ownership": "owned-process-group" if owns_runtime else "external-server",
+        "kv_cache": {
+            "state": "enabled-required-for-autoregressive-decode",
+            "configuration": kv_configuration,
+            "note": "ocupação/capacidade só é observada quando o runtime exporta a métrica",
+        },
+        "effective_cache_argv": cache_flags,
+        "prefix_cache": {"state": prefix_state, "effective_argv_flags": prefix_flags},
+        "model_residency": {
+            "state": (
+                "policy-configured-not-observed" if owns_runtime and keep_alive is not None
+                else "not-observed"
+            ),
+            "keep_alive_policy": keep_alive,
+        },
+        "runtime_environment": environment,
+    }
 
 
 def load_config(path):
@@ -383,12 +774,13 @@ def scenario_config(cfg, name, count, seed, secret, timeout):
 
 class Monitor:
     """Amostragem contínua e marcação de fases; não é um profiler PCIe."""
-    def __init__(self, output, cfg=None, secret="", collect_kv=False):
+    def __init__(self, output, cfg=None, secret="", collect_kv=False, collect_resources=True):
         self.output = Path(output)
         self.stop_event = threading.Event()
         self.thread = None
         self.phase = "setup"
         self.cfg, self.secret, self.collect_kv = cfg, secret, collect_kv
+        self.collect_resources = collect_resources
         self.kv_thread = None
         self.started_monotonic = None
 
@@ -408,9 +800,10 @@ class Monitor:
         self.events_handle = artifact(self.output, "events.csv").open("w", newline="", encoding="utf-8")
         csv.writer(self.events_handle).writerow(["utc", "monotonic_s", "elapsed_s", "phase", "event"])
         self.set_phase(self.phase, "monitor_started")
-        self.thread = threading.Thread(target=self.loop, daemon=True)
-        self.thread.start()
-        if self.collect_kv:
+        if self.collect_resources:
+            self.thread = threading.Thread(target=self.loop, daemon=True)
+            self.thread.start()
+        if self.collect_resources and self.collect_kv:
             self.kv_thread = threading.Thread(target=self.kv_loop, daemon=True)
             self.kv_thread.start()
 
@@ -653,6 +1046,11 @@ def turn_manifest(report):
                       "turn_index": row.get("turn_index"), "mode": row.get("mode"),
                       "fixture_sha256": row.get("fixture_sha256"), "history_tokens": row.get("history_tokens"),
                       "history_tokens_estimate": row.get("history_tokens_estimate"),
+                      "fixture_history_tokens_estimate": row.get("fixture_history_tokens_estimate"),
+                      "target_history_tokens": row.get("target_history_tokens"),
+                      "target_delta_tokens_estimate": row.get("target_delta_tokens_estimate"),
+                      "history_pairs_dropped": row.get("history_pairs_dropped"),
+                      "synthetic_context_tokens": row.get("synthetic_context_tokens"),
                       "prompt_tokens": row.get("prompt_tokens"), "total_tokens": row.get("total_tokens"),
                       "request_sha256": row.get("request_sha256")})
     return turns
@@ -674,7 +1072,12 @@ def conversation_artifact(report, fixture=None):
                          "error": row.get("error") if status != "successful" else None,
                          "request_sha256": row.get("request_sha256"),
                          "history_tokens": row.get("history_tokens"),
-                         "history_tokens_estimate": row.get("history_tokens_estimate")})
+                         "history_tokens_estimate": row.get("history_tokens_estimate"),
+                         "fixture_history_tokens_estimate": row.get("fixture_history_tokens_estimate"),
+                         "target_history_tokens": row.get("target_history_tokens"),
+                         "target_delta_tokens_estimate": row.get("target_delta_tokens_estimate"),
+                         "history_pairs_dropped": row.get("history_pairs_dropped"),
+                         "synthetic_context_tokens": row.get("synthetic_context_tokens")})
     artifact = {"mode": rows[0].get("mode") if rows else None, "turns": rows}
     if fixture:
         artifact["fixture"] = {"path": fixture["path"], "sha256": fixture["sha256"],
@@ -689,7 +1092,10 @@ def write_requests_csv(path, report):
     fields = ["status", "error", "mode", "request_id", "conversation_index", "turn_index",
               "fixture_name", "fixture_sha256", "workload_seed",
               "history_tokens", "history_tokens_estimate", "target_history_tokens", "messages_count",
-              "request_sha256", "request_start_time", "first_token_time", "request_end_time",
+              "fixture_history_tokens_estimate", "target_delta_tokens_estimate",
+              "history_pairs_dropped", "synthetic_context_tokens", "history_selection_policy",
+              "request_sha256", "request_start_time", "first_token_time", "last_token_time", "request_end_time",
+              "request_start_epoch_s", "first_content_epoch_s", "last_content_epoch_s", "request_end_epoch_s",
               "time_to_first_token_seconds", "generation_time_seconds", "end_to_end_latency_seconds",
               "completion_tokens", "prompt_tokens", "total_tokens", "decode_tokens_per_second",
               "end_to_end_tokens_per_second", "inter_token_latency_seconds", "request_latency",
@@ -703,6 +1109,50 @@ def write_requests_csv(path, report):
                 if status == "successful":
                     row = {**row, **derived(row)}
                 writer.writerow({"status": status, **{key: row.get(key) for key in fields[1:]}})
+
+
+def observability_request_rows(report, *, experiment_id, runtime, model, block,
+                               benchmark_phase, scenario, repetition):
+    """Normaliza requisições sem copiar prompt nem resposta para o dataset analítico."""
+    rows = []
+    requests = report["benchmarks"][0]["requests"]
+    for status in ("successful", "errored", "incomplete"):
+        for index, request in enumerate(requests[status], 1):
+            request_id = request.get("request_id") or f"request-{index}"
+            rows.append({
+                **request,
+                "experiment_id": experiment_id,
+                "request_uid": f"{experiment_id}:{block}:{request_id}:{index}",
+                "runtime": runtime,
+                "model": model,
+                "block": block,
+                "benchmark_phase": benchmark_phase,
+                "scenario": scenario,
+                "repetition": repetition,
+                "request_index": index,
+                "status": status,
+            })
+    return rows
+
+
+def lifecycle_observability_row(request, *, experiment_id, runtime, model, phase):
+    """Converte first/warm reference ao mesmo contrato das requisições do batch."""
+    if not request:
+        return None
+    return {
+        **request,
+        "experiment_id": experiment_id,
+        "request_uid": f"{experiment_id}:{phase}:1",
+        "runtime": runtime,
+        "model": model,
+        "block": phase,
+        "benchmark_phase": phase,
+        "scenario": None,
+        "repetition": None,
+        "request_index": 1,
+        "status": request.get("status", "unknown"),
+        "request_sha256": request_sha256(request.get("body") or {}),
+    }
 
 
 def write_summary(output, rows):
@@ -721,6 +1171,10 @@ def write_summary(output, rows):
 def run(args):
     import fcntl
     from lifecycle import DEFAULT_PROMPT, Launch, lifecycle_report, timed_request, wait_models
+    if args.prometheus_url:
+        from prometheus_dataset import prometheus_ready
+        if not prometheus_ready(args.prometheus_url):
+            raise ValueError(f"Prometheus indisponível em {args.prometheus_url}. Inicie a coleta antes do benchmark.")
     if importlib.metadata.version("guidellm") != GUIDELLM_VERSION:
         raise ValueError(f"Este projeto exige guidellm=={GUIDELLM_VERSION}; reinstale requirements.txt.")
     cfg = load_config(args.config)
@@ -728,11 +1182,15 @@ def run(args):
     availability = local_model_check(args.local_model_path)
     availability["kv_bytes_per_token"] = args.kv_bytes_per_token
     availability["launch_hf_offline"] = bool(args.launch)
+    secret = os.environ.get("BENCH_API_KEY", "")
+    model_identity = None
+    if args.model_metadata:
+        raw_model_identity = json.loads(Path(args.model_metadata).read_text(encoding="utf-8"))
+        model_identity = sanitize_model_identity(raw_model_identity, secret)
     digest = tokenizer_digest(cfg["tokenizer"])
     from transformers import AutoTokenizer
     measurement_tokenizer = AutoTokenizer.from_pretrained(cfg["tokenizer"], local_files_only=True, trust_remote_code=False)
     count, repetitions = (3, 1) if args.smoke else (args.requests, args.repetitions)
-    secret = os.environ.get("BENCH_API_KEY", "")
     prompt = Path(args.first_prompt_file).read_text(encoding="utf-8") if args.first_prompt_file else DEFAULT_PROMPT
     if not prompt.strip():
         raise ValueError("O prompt inicial não pode estar vazio.")
@@ -755,15 +1213,26 @@ def run(args):
                                 input_tokens=args.input_tokens, result_name=args.result_name)
         output = runtime_root(base, cfg["runtime"], stamp, label)
         prepare(output)
+        experiment_id = f"{stamp}-{slug(cfg['runtime'])}-{label}"
+        run_start_epoch_s = time.time()
+        hardware = hardware_snapshot()
+        effective_runtime_environment = runtime_environment(cfg)
+        workload = workload_contract(args.scenarios, args.mode)
         manifest = {"project_version": VERSION, "guidellm_version": GUIDELLM_VERSION, "started_utc": stamp,
+                    "experiment_id": experiment_id,
                     "results_layout": "runtime/timestamp/human-name/{html,json,csv,logs,text}",
                     "result_name": label, "runtime_directory": slug(cfg["runtime"]),
                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
-                    "scenarios": args.scenarios, "seed": args.seed, "profile": "synchronous",
+                    "scenarios": args.scenarios, "input_tokens": args.input_tokens,
+                    "output_tokens": OUTPUT_TOKENS, "seed": args.seed, "profile": "synchronous",
+                    "generation_parameters": {
+                        "temperature": 0, "top_p": 1,
+                        "max_output_tokens": OUTPUT_TOKENS, "stream": True,
+                    },
                     "mode": args.mode, "conversation_turns": args.conversation_turns,
-                    "prompt_policy": ("deterministic unique prompt per request; warmup and measure use disjoint seeds"
-                                      if not conversation_mode else "fixed conversation fixture"),
+                    "workload": workload,
+                    "prompt_policy": workload["prompt_policy"],
                     "conversation_fixture": {"path": conversation_fixture["path"], "sha256": conversation_fixture["sha256"],
                                              "name": conversation_fixture["data"].get("name"),
                                              "version": conversation_fixture["data"].get("version")} if conversation_fixture else None,
@@ -774,17 +1243,35 @@ def run(args):
                     "conversation_first_request": "first-request.json is a separate single-turn lifecycle probe; closed-loop/replay measured histories start empty per conversation and per block",
                     "blocks": [],
                     "model_availability": availability,
+                    "model_identity": model_identity,
+                    "hardware": hardware,
+                    "runtime_process": {
+                        "ownership": "owned-process-group" if args.launch else "existing-server",
+                        "argv": None,
+                    },
+                    "runtime_environment": effective_runtime_environment,
+                    "cache_policy_details": describe_cache_policy(
+                        cfg, [], bool(args.launch), effective_runtime_environment
+                    ),
                     "guidellm_compat": "0.7.4 bounded drain of real late completion updates (5s); no request retry",
                     "telemetry": {"gpu_source": "local nvidia-smi", "system_source": "psutil host CPU/RAM/disk counters",
                                   "event_source": "events.csv phase markers", "kv_metrics_requested": args.collect_kv_metrics,
-                                  "sampling": "approximately 1 Hz; not per-token; PCIe copy time is not directly measured"},
+                                  "native_monitor_enabled": not args.disable_native_monitor,
+                                  "native_sampling": ("approximately 1 Hz" if not args.disable_native_monitor else None),
+                                  "limits": "sampling is not per-token; PCIe copy time is not directly measured",
+                                  "prometheus": {"enabled": bool(args.prometheus_url), "url": args.prometheus_url,
+                                                 "query": args.prometheus_query if args.prometheus_url else None,
+                                                 "step": args.prometheus_step if args.prometheus_url else None}},
                     "python": sys.version, "platform": platform.platform(),
                     "git": capture(["git", "rev-parse", "HEAD"]), "status": "running"}
         write_json(artifact(output, "manifest.json"), redact(manifest, secret))
         write_json(artifact(output, "client-packages.json"), {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()})
         write_json(artifact(output, "gpu-before.json"), capture(["nvidia-smi"]))
-        monitor, rows = Monitor(output, cfg, secret, args.collect_kv_metrics), []
-        launch, origin, cleanup_error = None, None, None
+        monitor = Monitor(output, cfg, secret, args.collect_kv_metrics,
+                          collect_resources=not args.disable_native_monitor)
+        rows = []
+        observability_requests = []
+        launch, origin, cleanup_error, dataset_error = None, None, None, None
         lifecycle = {"mode": "new-process" if args.launch else "existing-server-state-unknown",
                      "status": "running", "initial_state_note": args.initial_state,
                      "startup_timeout_s": args.startup_timeout}
@@ -792,8 +1279,14 @@ def run(args):
         try:
             monitor.start()
             if args.launch:
+                reject_sensitive_argv(args.launch_extra_args)
                 launch = Launch(cfg, args.launch, output, args.launch_extra_args, args.launch_executable)
+                reject_sensitive_argv(launch.argv)
                 lifecycle["argv"] = redact(launch.argv, secret)
+                manifest["runtime_process"]["argv"] = lifecycle["argv"]
+                manifest["cache_policy_details"] = describe_cache_policy(
+                    cfg, launch.argv, True, effective_runtime_environment
+                )
                 monitor.set_phase("process_startup")
                 origin = launch.start()
                 lifecycle["pid"] = launch.process.pid
@@ -805,6 +1298,9 @@ def run(args):
             print("Primeiro POST: medição da primeira resposta (nenhuma geração prévia enviada pelo cliente).", flush=True)
             lifecycle["first_request"] = timed_request(cfg, secret, args.timeout, prompt,
                                                        artifact(output, "first-request.json"), origin)
+            observability_requests.append(lifecycle_observability_row(
+                lifecycle["first_request"], experiment_id=experiment_id, runtime=cfg["runtime"],
+                model=cfg["model"], phase="first_request"))
             lifecycle_report(output, redact(lifecycle, secret))
             for rep in range(repetitions):
                 # Rotação balanceia parcialmente a posição dos cenários entre repetições.
@@ -821,12 +1317,24 @@ def run(args):
                         config = scenario_config(cfg, name, n, seed, secret, args.timeout)
                         config["mode"] = args.mode
                         active_fixture = warmup_conversation_fixture if phase == "warmup" else conversation_fixture
-                        config["prompt_policy"] = ("deterministic unique prompt per request; exact target content tokens; "
-                                                   "block seed plus request index") if not conversation_mode else "fixed conversation fixture"
+                        block_workload = workload_contract([name], args.mode)
+                        config["workload"] = block_workload
+                        config["prompt_policy"] = block_workload["prompt_policy"]
                         if conversation_mode:
                             config["conversation_turns"] = args.conversation_turns
                             config["conversation_fixture_sha256"] = active_fixture["sha256"]
-                            config["spec_note"] = "Warmup usa fixture separada; medição usa fixture replay versionada com perguntas variadas e histórico determinístico."
+                            if args.mode == "replay" and name in NAMED_WORKLOADS:
+                                config["spec_note"] = (
+                                    "Warmup e medição usam fixtures separadas. O histórico fixo mais próximo "
+                                    "do alvo é selecionado, pares antigos podem ser removidos e contexto "
+                                    "sintético determinístico completa o prompt sem exceder o alvo. "
+                                    "usage.prompt_tokens do runtime é a medida real."
+                                )
+                            else:
+                                config["spec_note"] = (
+                                    "Warmup usa fixture separada; medição usa a fixture versionada. "
+                                    "usage.prompt_tokens do runtime é a medida real quando disponível."
+                                )
                         write_json(artifact(output, f"{prefix}-config.json"), redact(config, secret))
                         expected = n * args.conversation_turns if conversation_mode else n
                         unit = "conversas" if conversation_mode else "requisições"
@@ -837,6 +1345,9 @@ def run(args):
                         else:
                             report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret, seed)
                         raw = redact(report, secret)
+                        observability_requests.extend(observability_request_rows(
+                            raw, experiment_id=experiment_id, runtime=cfg["runtime"], model=cfg["model"],
+                            block=prefix, benchmark_phase=phase, scenario=name, repetition=rep + 1))
                         write_json(artifact(output, f"{prefix}.json"), raw)
                         turns = turn_manifest(raw) if conversation_mode else []
                         conversation_file = None
@@ -866,6 +1377,9 @@ def run(args):
             monitor.set_phase("warm_reference")
             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
                                                          artifact(output, "warm-reference.json"))
+            observability_requests.append(lifecycle_observability_row(
+                lifecycle["warm_reference"], experiment_id=experiment_id, runtime=cfg["runtime"],
+                model=cfg["model"], phase="warm_reference"))
             manifest["status"] = lifecycle["status"] = "complete"
         except BaseException as exc:
             manifest["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
@@ -877,6 +1391,27 @@ def run(args):
             for key, filename in (("first_request", "first-request.json"), ("warm_reference", "warm-reference.json")):
                 if artifact(output, filename).exists():
                     lifecycle[key] = json.loads(artifact(output, filename).read_text(encoding="utf-8"))
+                    uid = f"{experiment_id}:{key}:1"
+                    if not any(row and row.get("request_uid") == uid for row in observability_requests):
+                        observability_requests.append(lifecycle_observability_row(
+                            lifecycle[key], experiment_id=experiment_id, runtime=cfg["runtime"],
+                            model=cfg["model"], phase=key))
+            observability_requests = [row for row in observability_requests if row is not None]
+            if args.prometheus_url:
+                monitor.set_phase("prometheus_export")
+                try:
+                    from prometheus_dataset import export_dataset
+                    manifest["observability_request_count"] = len(observability_requests)
+                    manifest["dataset"] = export_dataset(
+                        output=output, manifest=redact(manifest, secret), requests=observability_requests,
+                        prometheus_url=args.prometheus_url, query=args.prometheus_query,
+                        step=args.prometheus_step, run_start_epoch_s=run_start_epoch_s,
+                        run_end_epoch_s=time.time(), margin_seconds=args.prometheus_margin_seconds,
+                    )
+                except Exception as exc:
+                    dataset_error = redact(str(exc), secret)
+                    manifest["prometheus_export_error"] = dataset_error
+                    manifest["status"] = lifecycle["status"] = "failed"
             if launch is not None:
                 monitor.set_phase("server_shutdown")
                 try:
@@ -888,12 +1423,23 @@ def run(args):
                     lifecycle["status"] = manifest["status"] = "failed"
             lifecycle_report(output, redact(lifecycle, secret))
             monitor.stop()
-            manifest["ended_utc"] = datetime.now(timezone.utc).isoformat()
-            write_json(artifact(output, "manifest.json"), redact(manifest, secret))
             write_json(artifact(output, "gpu-after.json"), capture(["nvidia-smi"]))
             write_summary(output, rows)
+            manifest["ended_utc"] = datetime.now(timezone.utc).isoformat()
+            write_json(artifact(output, "manifest.json"), redact(manifest, secret))
+            if args.prometheus_url and artifact(output, "dataset-manifest.json").is_file():
+                try:
+                    from prometheus_dataset import finalize_checksums
+                    finalize_checksums(output)
+                except Exception as exc:
+                    dataset_error = redact(str(exc), secret)
+                    manifest["checksum_finalize_error"] = dataset_error
+                    manifest["status"] = lifecycle["status"] = "failed"
+                    write_json(artifact(output, "manifest.json"), redact(manifest, secret))
         if cleanup_error:
             raise RuntimeError(f"Falha ao encerrar processo criado: {cleanup_error}. Confira o PID no lifecycle.json.")
+        if dataset_error:
+            raise RuntimeError(f"Falha ao exportar dataset Prometheus: {dataset_error}")
         print(f"Concluído. Abra {artifact(output, 'lifecycle.html')} e {artifact(output, 'summary.html')}")
 
 
@@ -908,6 +1454,13 @@ def nonnegative(value):
     number = int(value)
     if number < 0:
         raise argparse.ArgumentTypeError("Use zero ou um inteiro positivo.")
+    return number
+
+
+def nonnegative_float(value):
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise argparse.ArgumentTypeError("Use zero ou um número positivo.")
     return number
 
 
@@ -929,6 +1482,8 @@ def rebuild_report(args):
 
 
 def main():
+    from prometheus_dataset import DEFAULT_QUERY
+
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     report = commands.add_parser("report", help="Regenera derivados de uma execução existente, sem nova inferência.")
@@ -942,7 +1497,10 @@ def main():
     cmd = commands.add_parser("run", help="Mede primeiro acesso, aquecimento e GuideLLM; lançamento do servidor é opcional.")
     cmd.add_argument("--config", required=True)
     cmd.add_argument("--local-model-path", required=True, help="Pesos já no SSD: pasta HF, arquivo GGUF ou blob local do Ollama. Não baixa arquivos.")
+    cmd.add_argument("--model-metadata", help="JSON de identidade gerado antes da medição; não pode conter credenciais.")
     cmd.add_argument("--collect-kv-metrics", action="store_true", help="Amostra /metrics do vLLM (~1 Hz); ocupação do pool KV, não bytes.")
+    cmd.add_argument("--disable-native-monitor", action="store_true",
+                     help="Desativa o coletor CSV legado quando Prometheus já coleta os recursos.")
     cmd.add_argument("--kv-bytes-per-token", type=positive, help="Opcional: bytes de KV lógico por token, calculados para arquitetura/dtype reais. Estimativa, não VRAM medida.")
     cmd.add_argument("--input-tokens", nargs="+", type=positive, help="Substitui --scenarios por uma grade de comprimentos sintéticos, ex.: 256 512 1024 2048 3072.")
     cmd.add_argument("--scenarios", nargs="+", choices=list(WORKLOADS), default=["short", "medium", "long"])
@@ -970,6 +1528,14 @@ def main():
     cmd.add_argument("--startup-timeout", type=positive, default=1800, help="Limite da espera pela API com --launch, em segundos.")
     cmd.add_argument("--first-prompt-file", help="Texto UTF-8 para a primeira requisição e referência final; default: pergunta sobre RAM/VRAM.")
     cmd.add_argument("--initial-state", default="weights local; OS/compilation caches not controlled", help="Descreva SSD e caches existentes; apenas registra, não limpa.")
+    cmd.add_argument("--prometheus-url",
+                     help="Ativa exportação obrigatória da janela do Prometheus ao fim da execução.")
+    cmd.add_argument("--prometheus-query", default=DEFAULT_QUERY,
+                     help="PromQL usada para o dataset temporal.")
+    cmd.add_argument("--prometheus-step", default="500ms",
+                     help="Resolução da query_range (deve acompanhar o scrape interval).")
+    cmd.add_argument("--prometheus-margin-seconds", type=nonnegative_float, default=1.0,
+                     help="Margem antes/depois da janela exportada.")
     cmd.set_defaults(func=run)
     args = parser.parse_args()
     if hasattr(args, "launch_extra_args_json"):

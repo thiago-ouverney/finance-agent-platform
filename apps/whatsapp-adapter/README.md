@@ -1,5 +1,8 @@
 # WhatsApp AI Chat Adapter
 
+> **Objetivo:** configurar e executar a ponte entre contatos autorizados do
+> WhatsApp e um endpoint de chat OpenAI-compatible.
+
 Adapter mínimo entre o WhatsApp, via Baileys, e um endpoint de chat compatível com a API da OpenAI, como Ollama, vLLM ou llama.cpp.
 
 O componente não contém lógica financeira nem processa anexos. Cada contato autorizado possui um histórico curto persistido em JSON. Cada chamada contém:

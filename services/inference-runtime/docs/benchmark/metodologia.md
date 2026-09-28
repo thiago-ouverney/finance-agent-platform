@@ -1,5 +1,8 @@
 # Um usuário. Três runtimes. Um instrumento.
 
+> **Objetivo:** definir os controles, métricas e limites metodológicos da
+> comparação entre vLLM, llama.cpp e Ollama.
+
 O artefato da rodada validada é `arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf`, mantido idêntico entre os runtimes quando o backend o aceitar. No vLLM, GGUF exige `vllm-gguf-plugin` e deve ser tratado como experimental/subotimizado. Se o carregamento falhar, a execução falha e preserva logs; não troque silenciosamente o modelo para preencher uma tabela.
 
 Este estudo pergunta: **como o runtime e seus parâmetros mudam o tempo de resposta de um chatbot para uma pessoa?** A carga de múltiplos usuários fica para o próximo trabalho.
@@ -26,17 +29,27 @@ Uma execução do cliente por vez não impede interferência externa: outro term
 
 ## 3. Qual carga será usada?
 
-O próprio GuideLLM gera texto sintético com um tokenizer fixado. Usamos aproximadamente 256, 2048 e, opcionalmente, 8192 tokens de conteúdo, com teto de 128 tokens na resposta. O [gerador de datasets](https://vllm-project.github.io/guidellm/0.7.0/guides/datasets/) fornece uma carga repetível por semente.
+Os cenários nomeados usam alvos reproduzíveis de 256, 2048 e 7680 tokens,
+com teto de 128 tokens na resposta. O alvo longo cabe no contexto padrão de
+8192 com margem para saída e template.
 
 | Cenário | Conteúdo de entrada | Teto de saída | Pergunta experimental |
 |---|---:|---:|---|
 | short | ~256 tokens | 128 | Quanto demora uma interação curta? |
 | medium | ~2048 tokens | 128 | Como aumenta o custo de processar contexto? |
-| long | ~8192 tokens | 128 | O que acontece com uma entrada grande, se couber? |
+| long | ~7680 tokens | 128 | O que acontece com uma entrada grande próxima do limite? |
 
 Esses números são **nosso desenho**, não limites oficiais de classificação de chatbot. Tokens de template e mensagens de sistema podem aumentar a entrada total. O servidor devolve as contagens reais, que devem ser analisadas.
 
-O benchmark atual usa uma fixture replay validada no repositório, com 50 perguntas técnicas em português e histórico determinístico crescente. Cada requisição é uma conversa nova reconstruída a partir dos turnos fixos; a resposta real do runtime não altera o próximo request. O cenário longo continua representando uma carga de contexto sintética separada do eixo conversacional. O warmup usa outra fixture e não entra na medição. Quando o modo `independent` é solicitado, cada amostra recebe um prompt determinístico distinto com o mesmo tamanho-alvo, e warmup e medição usam sementes disjuntas.
+No modo `replay`, o alvo é o prompt completo depois do chat template. Para cada
+cenário, o cliente escolhe o histórico fixo da fixture mais próximo do alvo. Se
+ele passar do alvo, remove pares `user`/`assistant` mais antigos; se ficar
+abaixo, completa o `system` com contexto sintético determinístico. Assim,
+`short`, `medium` e `long` não são apenas três nomes para as mesmas mensagens.
+A contagem retornada pelo runtime em `usage.prompt_tokens` permanece a medida
+real e a estimativa do cliente fica registrada separadamente. Warmup usa outra
+fixture. No modo `independent`, o alvo continua sendo o conteúdo sintético antes
+do chat template, com sementes distintas entre warmup e medição.
 
 O modelo pode encerrar antes de 128 tokens. Não forçamos ignore-EOS porque não é um parâmetro portátil entre os três servidores. Registrar saída efetiva é obrigatório: uma configuração pode parecer mais rápida apenas por gerar menos texto. Textos sintéticos também podem provocar respostas curtas ou estranhas; confirme os comprimentos no piloto antes de investir na bateria inteira.
 
@@ -251,7 +264,7 @@ Esse benchmark mede desempenho, **não qualidade**. Uma pequena bateria fixa de 
 
 Antes da medição, `make prepare-all` encadeia `prepare-vllm`, `prepare-llama` e `prepare-ollama`. Cada alvo por runtime chama a etapa comum `prepare-benchmark`, que cria diretórios, baixa o GGUF e tokenizer, instala o cliente e valida configurações; depois valida somente o runtime escolhido. Essas etapas são preparação e não entram nos tempos do benchmark.
 
-O protocolo formal usa `short`, `medium` e `long` automaticamente, com 50 requisições em `replay`, 1 repetição e 3 aquecimentos por cenário. A fixture de medição `qwen_chat_bench_v2.json` tem 50 perguntas técnicas variadas; cada request seleciona um turno diferente e envia o histórico determinístico até ele. A fixture de warmup `qwen_chat_warmup_v1.json` é separada e nunca entra nos percentis. As métricas principais têm nomes canônicos: **Time To First Token (ms)**, um valor por requisição do POST ao primeiro token, e **Tokens/s**, a taxa de decode sem o TTFT. Com uma repetição, não há estimativa de variabilidade entre blocos; aumente `BENCH_REPETITIONS` manualmente quando essa análise for necessária. Percentis são calculados sobre requisições bem-sucedidas.
+O protocolo formal usa `short`, `medium` e `long` automaticamente, com 50 requisições em `replay`, 1 repetição e 3 aquecimentos por cenário. A fixture de medição `qwen_chat_bench_v2.json` tem 50 perguntas técnicas variadas; cada request seleciona um turno pelo alvo e ajusta o histórico deterministicamente conforme o contrato acima. A fixture de warmup `qwen_chat_warmup_v1.json` é separada e nunca entra nos percentis. As métricas principais têm nomes canônicos: **Time To First Token (ms)**, um valor por requisição do POST ao primeiro token, e **Tokens/s**, a taxa de decode sem o TTFT. Com uma repetição, não há estimativa de variabilidade entre blocos; aumente `BENCH_REPETITIONS` manualmente quando essa análise for necessária. Percentis são calculados sobre requisições bem-sucedidas.
 
 O monitor escreve `gpu.csv`, `system.csv` e `events.csv` durante toda a vida do processo e gera `telemetry-summary.json` agrupado pelas fases. CPU/RAM/SSD são observações do host; VRAM/utilização/temperatura/potência vêm do `nvidia-smi`. Esses sinais relacionam mudanças a startup, primeiro POST, aquecimento, medida e encerramento, mas não medem o tempo de cada cópia PCIe: para isso, use Nsight/CUDA instrumentation.
 

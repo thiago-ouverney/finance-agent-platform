@@ -1,5 +1,8 @@
 # Git no RunPod, sem mistério
 
+> **Objetivo:** instalar Git, obter o repositório e configurar autenticação no
+> RunPod sem copiar credenciais privadas desnecessariamente.
+
 **Git** é o programa que mantém o histórico do código. **GitHub** é um serviço que hospeda repositórios. Não existe “instalar minha conta Git” no pod: você instala Git e baixa seu repositório. Para clonar um repositório público, nem login é necessário.
 
 ## 1. Instalar Git na VM

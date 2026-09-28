@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import bench
@@ -84,9 +85,63 @@ class UnitTests(unittest.TestCase):
         self.assertAlmostEqual(bench.percentile([1, 2, 3], .95), 2.9)
         self.assertIsNone(bench.percentile([None], .95))
 
+    def test_observability_rows_have_stable_unique_ids_without_prompt_or_output_contract(self):
+        report = {"benchmarks": [{"requests": {
+            "successful": [{"request_id": "short-1", "output": "privado",
+                            "request_start_epoch_s": 10.0, "request_end_epoch_s": 11.0}],
+            "errored": [{"request_id": "short-2", "error": "falha"}],
+            "incomplete": [],
+        }}]}
+        rows = bench.observability_request_rows(
+            report, experiment_id="exp", runtime="vllm", model="m",
+            block="r1-short-measure", benchmark_phase="measure",
+            scenario="short", repetition=1,
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len({row["request_uid"] for row in rows}), 2)
+        self.assertEqual(rows[0]["benchmark_phase"], "measure")
+        self.assertEqual(rows[1]["status"], "errored")
+
     def test_redaction(self):
         self.assertEqual(bench.redact({"api_key": "secret", "x": "a-secret"}, "secret"),
                          {"api_key": "[REDACTED]", "x": "a-[REDACTED]"})
+        self.assertEqual(
+            bench.redact(["server", "--api-key", "from-extra-args", "--token=inline"], ""),
+            ["server", "--api-key", "[REDACTED]", "--token=[REDACTED]"],
+        )
+        with self.assertRaisesRegex(ValueError, "Segredos não podem"):
+            bench.reject_sensitive_argv(["--api-key", "must-not-leak"])
+
+    def test_model_metadata_uses_allowlist_and_redacts_environment_secrets(self):
+        identity = bench.sanitize_model_identity({
+            "schema_version": 1,
+            "local_path": "/models/safe.gguf",
+            "sha256": "a" * 64,
+            "api_key": "must-not-leak",
+            "artifact": {
+                "kind": "gguf",
+                "files": [{"path": "safe.gguf", "sha256": "a" * 64,
+                           "bytes": 4, "authorization": "must-not-leak"}],
+            },
+        })
+        encoded = json.dumps(identity)
+        self.assertNotIn("must-not-leak", encoded)
+        self.assertNotIn("api_key", encoded)
+        self.assertNotIn("authorization", encoded)
+
+    def test_cache_policy_separates_kv_prefix_and_residency(self):
+        details = bench.describe_cache_policy(
+            {"runtime": "vllm", "cache_policy": "recorded"},
+            ["vllm", "serve", "--no-enable-prefix-caching", "--kv-cache-dtype", "fp8"],
+            True,
+        )
+        self.assertEqual(details["prefix_cache"]["state"], "disabled-explicit-argv")
+        self.assertEqual(details["model_residency"]["state"], "not-observed")
+        self.assertEqual(details["effective_cache_argv"],
+                         ["--no-enable-prefix-caching", "--kv-cache-dtype", "fp8"])
+        self.assertEqual(details["prefix_cache"]["effective_argv_flags"],
+                         ["--no-enable-prefix-caching"])
+        self.assertIn("enabled-required", details["kv_cache"]["state"])
 
     def test_context_guard(self):
         cfg = bench.load_config(bench.ROOT / "configs/vllm.json")
@@ -95,6 +150,23 @@ class UnitTests(unittest.TestCase):
             bench.validate_run(cfg, ["long"], True)
         with self.assertRaises(ValueError):
             bench.validate_run(cfg, ["short"], False)
+
+        cfg["context_window"] = 8192
+        bench.validate_run(cfg, ["short", "medium", "long"], True)
+        self.assertEqual(bench.NAMED_WORKLOADS,
+                         {"short": 256, "medium": 2048, "long": 7680})
+
+    def test_workload_contract_fingerprints_targets_and_prompt_authority(self):
+        contract = bench.workload_contract(["short", "medium", "long"], "replay")
+        self.assertEqual(contract["named_scenario_defaults"], bench.NAMED_WORKLOADS)
+        self.assertEqual(contract["input_token_targets"], bench.NAMED_WORKLOADS)
+        self.assertIn("truncation/padding", contract["prompt_policy"])
+        self.assertIn("usage.prompt_tokens", contract["prompt_tokens_authority"])
+        self.assertEqual(contract, bench.workload_contract(
+            ["short", "medium", "long"], "replay"
+        ))
+        self.assertNotEqual(contract["sha256"],
+                            bench.workload_contract(["short", "medium"], "replay")["sha256"])
 
     def test_profile_never_sweeps(self):
         cfg = bench.load_config(bench.ROOT / "configs/vllm.json")
@@ -199,6 +271,81 @@ class UnitTests(unittest.TestCase):
         self.assertEqual([message["role"] for message in messages], ["system", "user", "assistant", "user"])
         self.assertEqual(messages[2]["content"], "a1 fixa")
 
+    def test_named_replay_scenarios_target_distinct_prompt_sizes(self):
+        class FakeTokenizer:
+            def encode(self, text, add_special_tokens=False):
+                return text.split()
+
+            def decode(self, ids, skip_special_tokens=False):
+                return " ".join(ids)
+
+            def apply_chat_template(self, messages, tokenize=True, add_generation_prompt=True):
+                tokens = []
+                for message in messages:
+                    tokens.extend([message["role"], *message["content"].split()])
+                if add_generation_prompt:
+                    tokens.append("assistant")
+                return tokens
+
+        tokenizer = FakeTokenizer()
+        fixture = {"sha256": "fixture-hash", "data": {
+            "name": "targeted-replay",
+            "system": "sistema fixo",
+            "turns": [
+                {"user": f"pergunta número {index}",
+                 "assistant": " ".join(f"a{index}-{word}" for word in range(150))}
+                for index in range(1, 18)
+            ],
+        }}
+        calls = []
+        original = bench.stream_messages_request
+
+        def fake_stream(cfg, messages, timeout, secret="", max_tokens=bench.OUTPUT_TOKENS,
+                        metadata=None):
+            estimate = bench.estimate_messages_tokens(tokenizer, messages)
+            actual_prompt_tokens = estimate + 7
+            calls.append([dict(message) for message in messages])
+            return {
+                **(metadata or {}),
+                "prompt_tokens": actual_prompt_tokens,
+                "history_tokens": actual_prompt_tokens,
+                "output": "resposta",
+            }
+
+        bench.stream_messages_request = fake_stream
+        try:
+            rows = {}
+            for scenario in ("short", "medium", "long"):
+                report = bench.run_conversational_batch(
+                    {"model": "m"}, tokenizer, scenario, 1, 1, 1,
+                    fixture=fixture, loop_mode="replay",
+                )
+                rows[scenario] = report["benchmarks"][0]["requests"]["successful"][0]
+        finally:
+            bench.stream_messages_request = original
+
+        estimates = [rows[name]["history_tokens_estimate"]
+                     for name in ("short", "medium", "long")]
+        self.assertEqual(len(set(estimates)), 3)
+        self.assertEqual(len({rows[name]["turn_index"] for name in rows}), 3)
+        for name, row in rows.items():
+            target = bench.NAMED_WORKLOADS[name]
+            self.assertLessEqual(row["history_tokens_estimate"], target)
+            self.assertLessEqual(target - row["history_tokens_estimate"], 2)
+            self.assertEqual(row["prompt_tokens"], row["history_tokens_estimate"] + 7)
+            self.assertEqual(row["history_tokens"], row["prompt_tokens"])
+            self.assertEqual(row["target_history_tokens"], target)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(messages[-1]["role"] == "user" for messages in calls))
+
+        trimmed_messages, metadata = bench._target_replay_messages(
+            tokenizer, fixture, 17, bench.NAMED_WORKLOADS["short"], "trim-test"
+        )
+        self.assertGreater(metadata["history_pairs_dropped"], 0)
+        self.assertLessEqual(metadata["history_tokens_estimate"],
+                             bench.NAMED_WORKLOADS["short"])
+        self.assertIn("17", trimmed_messages[-1]["content"])
+
     def test_fixture_schema_and_replay_preflight(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "conversation.json"
@@ -220,6 +367,9 @@ class UnitTests(unittest.TestCase):
             "request_args": json.dumps({"body": {"messages": messages, "max_tokens": 128}}),
             "output": "a", "request_sha256": "hash", "history_tokens": 12,
             "history_tokens_estimate": 10,
+            "fixture_history_tokens_estimate": 18, "target_history_tokens": 12,
+            "target_delta_tokens_estimate": 2, "history_pairs_dropped": 1,
+            "synthetic_context_tokens": 3,
         }
         report = {"benchmarks": [{"requests": {"successful": [row], "errored": [], "incomplete": []}}]}
         artifact = bench.conversation_artifact(report, {"path": "fixture.json", "sha256": "fixture-hash",
@@ -227,6 +377,8 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(artifact["fixture"]["sha256"], "fixture-hash")
         self.assertEqual(artifact["turns"][0]["messages"], messages)
         self.assertEqual(artifact["turns"][0]["assistant_output"], "a")
+        self.assertEqual(artifact["turns"][0]["target_history_tokens"], 12)
+        self.assertEqual(artifact["turns"][0]["history_pairs_dropped"], 1)
 
     def test_parser_allows_zero_warmup_only(self):
         original_argv, original_run = sys.argv, bench.run
@@ -283,20 +435,22 @@ class UnitTests(unittest.TestCase):
             env_file = Path(tmp) / "child-env.json"
             code = (
                 "import json, os, pathlib; "
-                f"pathlib.Path({str(env_file)!r}).write_text(json.dumps({{'HF_HUB_OFFLINE': os.getenv('HF_HUB_OFFLINE'), 'TRANSFORMERS_OFFLINE': os.getenv('TRANSFORMERS_OFFLINE')}})); "
+                f"pathlib.Path({str(env_file)!r}).write_text(json.dumps({{'HF_HUB_OFFLINE': os.getenv('HF_HUB_OFFLINE'), 'TRANSFORMERS_OFFLINE': os.getenv('TRANSFORMERS_OFFLINE'), 'HF_TOKEN': os.getenv('HF_TOKEN'), 'BENCH_API_KEY': os.getenv('BENCH_API_KEY')}})); "
                 "import time; time.sleep(30)"
             )
             argv_file = Path(tmp) / "argv.json"
             argv_file.write_text(json.dumps([sys.executable, "-c", code]))
             launch = Launch({"base_url": f"http://127.0.0.1:{port}"}, argv_file, tmp)
-            launch.start()
+            with mock.patch.dict("os.environ", {"HF_TOKEN": "private", "BENCH_API_KEY": "private"}):
+                launch.start()
             try:
                 deadline = time.monotonic() + 3
                 while not env_file.exists() and time.monotonic() < deadline:
                     time.sleep(0.01)
                 self.assertTrue(env_file.exists())
                 self.assertEqual(json.loads(env_file.read_text()), {
-                    "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+                    "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+                    "HF_TOKEN": None, "BENCH_API_KEY": None})
             finally:
                 launch.close()
 

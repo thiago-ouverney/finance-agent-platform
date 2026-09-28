@@ -1,5 +1,8 @@
 # Documentação
 
+> **Objetivo:** organizar os materiais do benchmark por execução, metodologia,
+> engenharia e histórico.
+
 Documentos separados por função para não misturar instruções de execução, método, engenharia e diagnósticos históricos.
 
 ## Benchmark
@@ -8,6 +11,7 @@ Explica o que é medido e como interpretar os resultados.
 
 - [Bench explicado](benchmark/bench-explicado.md)
 - [Metodologia](benchmark/metodologia.md)
+- [Observabilidade headless e interativa com Prometheus](benchmark/observabilidade-prometheus.md)
 
 ## Make e execução
 

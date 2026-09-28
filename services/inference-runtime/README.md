@@ -1,8 +1,14 @@
 # Chatbot Runtime Bench
 
+> **Objetivo:** preparar e executar a comparação reproduzível de vLLM,
+> llama.cpp e Ollama com o mesmo artefato e uma requisição por vez.
+
 Benchmark acadêmico de inferência local para comparar **vLLM, llama.cpp e Ollama** usando o mesmo modelo GGUF, uma requisição por vez e uma carga de chatbot reproduzível.
 
-O fluxo oficial é baseado no `Makefile`. O benchmark não baixa modelos, não troca artefatos automaticamente e não faz fallback quando um runtime falha. Download, criação de diretórios e instalação são preparação; não entram nos tempos medidos.
+O fluxo oficial é baseado no `Makefile`. A bateria `bench-*` não baixa modelos,
+não troca artefatos automaticamente e não faz fallback quando um runtime falha.
+O alvo `observe-bench` pode orquestrar a preparação, mas termina downloads,
+criação de diretórios e instalação antes de abrir a janela medida.
 
 Documentação detalhada: [índice de documentação](docs/README.md) · [bench explicado](docs/benchmark/bench-explicado.md) · [fluxo completo do Make](docs/make/make-fluxo.md) · [metodologia](docs/benchmark/metodologia.md) · [código explicado](docs/engenharia/codigo-explicado.md). Resultados e diagnósticos datados ficam no arquivo histórico do monorepo.
 
@@ -58,6 +64,80 @@ make bench-all MODEL_SIZE=7B
 ```
 
 Para preparar ou medir somente um runtime, use `prepare-vllm`, `prepare-llama`, `prepare-ollama`, `bench-vllm`, `bench-llama` ou `bench-ollama`. Os alvos por runtime já dependem da preparação comum; não é necessário chamar `prepare-benchmark` antes. `prepare-all` prepara os três, `smoke-all` testa os três rapidamente e `bench-all` executa as baterias completas. O alvo `bench` é um alias de `bench-all`.
+
+## Benchmark headless com Prometheus
+
+Para medir uma bateria sequencial e salvar a telemetria sem abrir Jupyter:
+
+```bash
+make observe-bench OBS_RUNTIME=vllm \
+  OBS_MODEL_SOURCE=hf \
+  OBS_MODEL='Qwen/Qwen2.5-7B-Instruct' \
+  OBS_REVISION='<revisao-ou-commit>'
+```
+
+`observe-bench` prepara o modelo e o runtime antes da janela medida, mantém o
+Prometheus ativo durante o `bench.py` e encerra somente os processos que criou.
+O pacote contém os artefatos normais do benchmark e estes arquivos analíticos:
+
+```text
+all-requests.csv
+request-events.csv
+prometheus-samples.csv
+telemetry-by-request.csv
+request-phase-metrics.csv
+dataset-manifest.json
+```
+
+Use `OBS_MODEL_SOURCE=hf|local-hf` para Hugging Face remoto ou diretório local
+com vLLM. Para comparar vLLM, llama.cpp e Ollama, use
+`OBS_MODEL_SOURCE=gguf|local-gguf`, o mesmo arquivo GGUF e altere apenas
+`OBS_RUNTIME=vllm|llama|ollama`.
+Downloads e instalação são preparação, não medição.
+
+A carga é configurada por `OBS_BENCH_SCENARIOS`, `OBS_BENCH_REQUESTS`,
+`OBS_BENCH_REPETITIONS`, `OBS_BENCH_WARMUP` e `OBS_BENCH_MODE`. O diretório
+raiz pode ser alterado com `OBS_RESULTS_DIR`.
+
+Na máquina local:
+
+```bash
+make pull-observe-results OBS_REMOTE_HOST=runpod-qwen
+cd ../..
+make setup-notebook  # somente na primeira vez
+make observability-dataset
+make observability-notebook
+```
+
+Use `OBS_REMOTE_RESULTS_DIR` e `OBS_LOCAL_RESULTS_DIR` se os diretórios não
+forem os padrões.
+
+O notebook de comparação usa kernel local e arquivos já baixados. Ele não
+precisa de túnel, runtime ou Prometheus ativos. Resultados brutos, pesos e
+segredos permanecem fora do Git.
+
+Passo a passo: [benchmark de performance](../../docs/guias/gerar-benchmark-performance.md).
+Contrato técnico: [observabilidade com Prometheus](docs/benchmark/observabilidade-prometheus.md).
+
+## Perfil interativo com Prometheus e notebook
+
+Para diagnosticar uma requisição antes da bateria formal, use o fluxo
+`observe-*`. Ele prepara um runtime, coleta CPU/GPU/memória/disco no Prometheus
+e abre um notebook que marca TTFT/prefill observado e decode nos mesmos
+gráficos:
+
+```bash
+make observe-help
+make observe-bootstrap OBS_RUNTIME=vllm
+```
+
+O Jupyter e o kernel executam no Pod; o navegador local acessa a interface por
+túnel SSH. Uma requisição isolada serve para diagnóstico, não para concluir
+qual runtime é mais rápido. Para comparar vLLM, llama.cpp e Ollama, use o mesmo
+GGUF e depois confirme a hipótese com `bench-*`.
+
+Passo a passo: [perfil de inferência com Prometheus](../../docs/guias/perfilar-inferencia-prometheus.md).
+Contrato técnico: [observabilidade com Prometheus](docs/benchmark/observabilidade-prometheus.md).
 
 ## Como o benchmark funciona
 
@@ -252,13 +332,18 @@ Durante uma inicialização demorada, o progresso informa o endpoint `GET /v1/mo
 
 ## O que o benchmark mede
 
-Por runtime e cenário, são executadas 50 requisições de medição, 1 repetição e 3 aquecimentos. A bateria base usa `replay`: as 50 chamadas percorrem 50 perguntas técnicas distintas da fixture versionada, com histórico determinístico. O warmup usa outra fixture e nunca reutiliza os prompts medidos. A execução é síncrona: uma requisição ativa por vez.
+Por runtime e cenário, são executadas 50 requisições de medição, 1 repetição e 3 aquecimentos. A bateria base usa `replay`: as chamadas usam perguntas da fixture versionada e ajustam o histórico determinístico ao alvo do cenário, removendo pares antigos ou adicionando contexto sintético determinístico. O warmup usa outra fixture e nunca reutiliza os prompts medidos. A execução é síncrona: uma requisição ativa por vez.
 
 | Cenário | Entrada aproximada | Saída máxima |
 |---|---:|---:|
 | `short` | 256 tokens | 128 tokens |
 | `medium` | 2048 tokens | 128 tokens |
-| `long` | 8192 tokens | 128 tokens |
+| `long` | 7680 tokens | 128 tokens |
+
+No `replay`, esses valores são alvos do prompt completo estimado após o chat
+template; `usage.prompt_tokens` retornado pelo runtime é a contagem real e
+permanece separado da estimativa. Em `independent`, o alvo se refere ao conteúdo
+sintético antes do template.
 
 Métricas principais:
 

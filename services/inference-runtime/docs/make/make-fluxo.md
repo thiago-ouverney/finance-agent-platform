@@ -1,5 +1,8 @@
 # Fluxo completo do Makefile
 
+> **Objetivo:** explicar os alvos do Makefile e separar preparação, smoke,
+> medição formal e diagnóstico.
+
 Este documento explica o que acontece quando cada alvo é executado. O objetivo é separar preparação, lançamento, medição e diagnóstico.
 
 Requer GNU Make com suporte a `.ONESHELL` (3.82 ou mais recente). O Make 3.81 fornecido pelo macOS não executa corretamente receitas que compartilham variáveis de shell; use GNU Make atualizado (`gmake`) ou execute no pod.
@@ -72,7 +75,49 @@ Os três templates seguem esse mesmo contrato: chamam `vllm`, `llama-server` e `
 
 `prepare-ollama` usa o arquivo GGUF local em um `Modelfile` temporário e executa `ollama create`. O alias é `qwen7b-q8-gguf` ou `qwen14b-q8-gguf`. Não há `ollama pull`: o modelo deve vir do SSD informado. Se a API configurada já estiver ativa, o script a reutiliza e a preserva. Se não estiver, inicia um daemon temporário próprio, aguarda a API, cria/verifica o alias e encerra apenas o processo que criou. Essa tolerância vale para a preparação; `bench-ollama`, como os demais launchers medidos, requer a porta livre para possuir e cronometrar o servidor.
 
-## 4. Bateria formal
+## 4. Bateria Prometheus headless
+
+`make observe-bench` executa o ciclo completo para um runtime:
+
+1. valida `OBS_RUNTIME` e a origem do modelo;
+2. prepara dependências e baixa o artefato antes da medição;
+3. inicia o runtime e aguarda o modelo aparecer em `/v1/models`;
+4. inicia exporter e Prometheus;
+5. chama o `bench.py` com uma requisição por vez;
+6. associa as amostras às requisições e fases observadas;
+7. grava o dataset e encerra somente os processos que criou.
+
+Exemplo com Hugging Face no vLLM:
+
+```bash
+make observe-bench \
+  OBS_RUNTIME=vllm \
+  OBS_MODEL_SOURCE=hf \
+  OBS_MODEL='Qwen/Qwen2.5-7B-Instruct' \
+  OBS_REVISION='<revisao-ou-commit>'
+```
+
+`OBS_MODEL_SOURCE` aceita `hf`, `local-hf`, `gguf` e `local-gguf`. As duas
+fontes HF são exclusivas do vLLM; GGUF remoto ou local pode ser usado nos três
+runtimes. Para GGUF remoto, informe também `OBS_GGUF_FILENAME`. Tokenizer e
+revisão podem ser fixados por `OBS_TOKENIZER_MODEL` e
+`OBS_TOKENIZER_REVISION`.
+
+A carga é controlada por `OBS_BENCH_SCENARIOS`, `OBS_BENCH_REQUESTS`,
+`OBS_BENCH_REPETITIONS`, `OBS_BENCH_WARMUP` e `OBS_BENCH_MODE`.
+`OBS_RESULTS_DIR` muda a raiz dos pacotes.
+
+Além dos artefatos existentes, cada run produz `all-requests.csv`,
+`request-events.csv`, `prometheus-samples.csv`, `telemetry-by-request.csv`,
+`request-phase-metrics.csv` e `dataset-manifest.json`. Valor não exposto fica
+`null`, não zero. Prefill é o intervalo observado de TTFT; tráfego PCIe não é
+medido diretamente.
+
+Na máquina local, `make pull-observe-results` copia os pacotes. Na raiz do
+monorepo, `make observability-dataset` consolida as execuções e
+`make observability-notebook` abre a análise offline com kernel local.
+
+## 5. Bateria formal
 
 `bench` chama `bench-all`. O agregador executa `bench-vllm`, `bench-llama` e `bench-ollama`, guarda um código de saída para cada um, continua após falhas e retorna código diferente de zero no final se algum falhou.
 
@@ -90,11 +135,20 @@ Cada alvo individual:
 
 São 50 requisições por cenário, 1 repetição e 3 aquecimentos. A bateria base usa `BENCH_MODE=replay`: as 50 requisições percorrem as 50 perguntas de `qwen_chat_bench_v2.json`, com histórico e respostas `assistant` fixos. Os três warmups usam `qwen_chat_warmup_v1.json`, que não é reutilizado na medição. O perfil é síncrono, portanto não é um benchmark de concorrência.
 
-Por padrão, `BENCH_MODE=replay` percorre `workloads/conversations/qwen_chat_bench_v2.json`, com 50 perguntas e respostas `assistant` fixas. Cada request seleciona um turno distinto e envia o histórico até ele. O warmup usa `qwen_chat_warmup_v1.json`, separado da medição. `closed-loop` continua disponível para colocar respostas reais no histórico; `independent` deve ser solicitado explicitamente quando a intenção for medir mensagens isoladas. Os blocos conversacionais gravam `*-turns.json` e `*-conversation.json` além dos brutos e CSVs.
+Por padrão, `BENCH_MODE=replay` usa
+`workloads/conversations/qwen_chat_bench_v2.json`, com perguntas e respostas
+`assistant` fixas. `short`, `medium` e `long` têm alvos de 256, 2048 e 7680
+tokens: o cliente escolhe o histórico mais próximo e o ajusta de forma
+determinística, sem ultrapassar o alvo estimado. O warmup usa
+`qwen_chat_warmup_v1.json`, separado da medição. `prompt_tokens` retornado pelo
+runtime é a medida real. `closed-loop` continua disponível para colocar
+respostas reais no histórico; `independent` deve ser solicitado explicitamente
+quando a intenção for medir mensagens isoladas. Os blocos conversacionais
+gravam `*-turns.json` e `*-conversation.json` além dos brutos e CSVs.
 
 A espera de startup não aceita apenas um HTTP 200: o alias configurado precisa aparecer em `GET /v1/models`. Enquanto aguarda, o log periódico identifica o endpoint consultado, o modelo esperado e a última observação ou erro. Isso torna distinguível uma API inacessível de um servidor vivo que expõe o alias errado.
 
-## 5. Smoke e sweep rápido de integração
+## 6. Smoke e sweep rápido de integração
 
 Há smoke equivalente para cada runtime:
 
@@ -115,7 +169,7 @@ make quick-sweep-ollama MODEL_SIZE=7B
 
 O sweep rápido testa os pontos de 1024 e 5489 tokens até o limite padrão de 8192, com 1 requisição, 1 repetição e nenhum aquecimento por ponto. É diagnóstico de integração, não resultado estatístico nem substituto do sweep formal.
 
-## 6. Argumentos experimentais
+## 7. Argumentos experimentais
 
 Os launchers JSON fornecem a configuração base. Variáveis `VLLM_EXTRA_ARGS`, `LLAMA_EXTRA_ARGS` e `OLLAMA_EXTRA_ARGS` são acrescentadas ao argv sem serem sanitizadas ou corrigidas.
 
@@ -126,7 +180,7 @@ make bench-vllm MODEL_SIZE=7B \
 
 Esses argumentos aparecem no `lifecycle.json`. Se o runtime rejeitar a combinação, a execução falha e o `server.log` é a evidência.
 
-## 7. Sweep de KV
+## 8. Sweep de KV
 
 Depois da bateria base, `run_kv_sweep.py` copia o launcher para uma pasta temporária e chama `bench.py` novamente. O padrão começa em 1024 tokens e soma 256 MB de KV lógico por ponto; no Qwen2.5 7B isso produz aproximadamente 1024, 5489, 9954 e 14419 tokens. Em modo `replay`, cada ponto seleciona e cicla apenas os históricos da fixture que cabem no limite `ctx<N>`. O `max_model_len` permanece pelo menos no `context_window` configurado no runtime, sem o teto artificial `N + 128 + 256`.
 
@@ -138,7 +192,7 @@ O sweep repassa `SWEEP_MODE`, `SWEEP_CONVERSATION_TURNS` e `SWEEP_CONVERSATION_F
 
 O primeiro código de saída diferente de zero encerra o sweep. Nenhum ponto falho é convertido em zero ou substituído por outro modelo.
 
-## 8. Onde estão os resultados
+## 9. Onde estão os resultados
 
 Cada execução fica em `results/<runtime>/<timestamp>/<nome-humano>/`, com subpastas por formato:
 
@@ -159,7 +213,7 @@ Cada execução fica em `results/<runtime>/<timestamp>/<nome-humano>/`, com subp
 
 As métricas de throughput dos requests não são extraídas do `server.log`. O cliente abre SSE e registra relógios monotônicos por requisição: início, primeiro evento com conteúdo e fim. `decode_tokens_per_second` usa tokens de `usage` dividido pelo intervalo primeiro–último evento; `end_to_end_tokens_per_second` divide pela latência total. O `Avg generation throughput` periódico do vLLM permanece apenas como observabilidade agregada. Ausência de `usage` produz `null`, e uma resposta de um token não recebe inter-token latency zero.
 
-## 9. O que não é medido diretamente
+## 10. O que não é medido diretamente
 
 `nvidia-smi` mostra VRAM total usada pela GPU, não bytes exclusivamente do KV. CPU/RAM/SSD são contadores observacionais do host. O benchmark não mede o tempo de cada cópia PCIe ou RAM↔VRAM; isso exige Nsight Systems/Compute ou instrumentação CUDA no runtime.
 
@@ -167,13 +221,23 @@ Para copiar resultados, execute localmente: `make pull-results POD_SSH=root@HOST
 
 O profiling automatizado fica em `Makefile.profiling`, separado da bateria oficial. Execute `make -f Makefile.profiling profile-vllm-nsys MODEL_SIZE=7B` ou o alvo equivalente de `ncu`/llama.cpp em outro ambiente. O alvo inicia o servidor em primeiro plano; envie uma única requisição curta em outro terminal e encerre com `Ctrl-C`. Os relatórios ficam em `results/profiling/`. Não instale/remova Nsight durante `bench-vllm`, pois isso mudaria o ambiente e contaminaria a medição.
 
-## 10. Estado atual da validação no Pod
+## 11. Estado atual da validação no Pod
 
 A integração foi validada ao vivo em 22/09/2026 no RunPod com uma RTX 3090 e o GGUF 7B. Preparação offline, três smokes, três quick sweeps e `bench-all` reduzido passaram; o agregado terminou com `vLLM=0 llama.cpp=0 Ollama=0`. O relatório dessa rodada está preservado em `docs/archive/inference-runtime/` na raiz do monorepo.
 
 O vLLM foi executado com `--enforce-eager --max-model-len 2048 --gpu-memory-utilization 0.80`. O `EngineDeadError` visto no encerramento do sweep ocorre após respostas HTTP 200 e o SIGTERM intencional do harness; não foi OOM e o alvo retornou zero.
 
-## 11. Sequência recomendada
+## 12. Sequência recomendada
+
+Para uma rodada headless com Prometheus, o único alvo necessário é:
+
+```bash
+make observe-bench OBS_RUNTIME=vllm \
+  OBS_MODEL_SOURCE=hf \
+  OBS_MODEL='Qwen/Qwen2.5-7B-Instruct'
+```
+
+Para a bateria legada completa dos três runtimes:
 
 ```bash
 make prepare-all MODEL_SIZE=7B

@@ -88,6 +88,20 @@ LLAMA_SERVER_BIN ?= $(shell p=$$(command -v llama-server 2>/dev/null || true); i
 LLAMA_BACKEND_PATH ?= $(firstword $(wildcard /usr/local/lib/ollama/cuda_v12/libggml-cuda.so /usr/local/lib/ollama/cuda_v13/libggml-cuda.so))
 REQUIRE_GPU ?= 1
 OLLAMA_BIN ?= $(shell command -v ollama 2>/dev/null || printf 'ollama')
+PROMETHEUS_VERSION ?= 3.13.3
+PROMETHEUS_SHA256 ?= b349c732d8a853e657d0e7ae1bbad4d11b586615fb65fdc59d896b9f869c001e
+PROMETHEUS_INSTALL_DIR ?= $(CURDIR)/.tools/prometheus-$(PROMETHEUS_VERSION)
+PROMETHEUS_BIN ?= $(PROMETHEUS_INSTALL_DIR)/prometheus
+PROMETHEUS_STATE_DIR ?= $(CURDIR)/observability/.state
+PROMETHEUS_HOST ?= 127.0.0.1
+PROMETHEUS_PORT ?= 9090
+PROMETHEUS_EXPORTER_HOST ?= 127.0.0.1
+PROMETHEUS_EXPORTER_PORT ?= 9108
+PROMETHEUS_SCRAPE_INTERVAL ?= 500ms
+PROMETHEUS_SCRAPE_TIMEOUT ?= 450ms
+PROMETHEUS_RETENTION ?= 6h
+PROMETHEUS_RUNTIME_TARGET ?=
+PROMETHEUS_RUNTIME_METRICS_PATH ?= /metrics
 BENCH_SCENARIOS ?= short medium long
 BENCH_REQUESTS ?= 50
 BENCH_REPETITIONS ?= 1
@@ -120,7 +134,7 @@ QUANTIZE_SCRIPT := ../../pipelines/qwen-quantization/scripts/quantize_hf_to_gguf
 
 .PHONY: help check-tools clone-llama build-llama install-llama-python \
         download-source inspect-source quantize-q8 verify-gguf upload-hf \
-        install-benchmark download-model download-tokenizer check-runtimes check-vllm-gguf prepare-benchmark prepare-vllm prepare-llama prepare-ollama prepare-all smoke-vllm smoke-llama smoke-ollama smoke-all bench-vllm bench-llama bench-ollama bench-all bench kv-sweep kv-sweep-vllm kv-sweep-llama kv-sweep-ollama quick-sweep-vllm quick-sweep-llama quick-sweep-ollama pull-results check-profilers docs clean-info
+        install-benchmark download-model download-tokenizer check-runtimes check-vllm-gguf prepare-benchmark prepare-vllm prepare-llama prepare-ollama prepare-all smoke-vllm smoke-llama smoke-ollama smoke-all bench-vllm bench-llama bench-ollama bench-all bench kv-sweep kv-sweep-vllm kv-sweep-llama kv-sweep-ollama quick-sweep-vllm quick-sweep-llama quick-sweep-ollama prometheus-install prometheus-start prometheus-stop prometheus-status pull-results check-profilers docs clean-info
 
 help:
 	@printf '%s\n' \
@@ -154,6 +168,10 @@ help:
 		'  make bench-ollama          mesma bateria usando Ollama (modelo já criado localmente)' \
 		'  make bench-all             executa vLLM, llama.cpp e Ollama; continua e resume falhas' \
 		'  make kv-sweep              compatibilidade: KV sweep do vLLM (já incluído em bench-vllm)' \
+		'  make prometheus-start       instala/inicia Prometheus e o exporter local do Pod' \
+		'  make prometheus-status      verifica Prometheus e exporter' \
+		'  make prometheus-stop        encerra somente a pilha iniciada pelo projeto' \
+		'  make observe-help           fluxo interativo: runtime + Prometheus + notebook' \
 		'  make docs                 regenera os HTMLs dos documentos' \
 		'  make pull-results POD_SSH=root@host  copia results via SCP (SSH TCP direto)' \
 		'  make check-profilers      verifica nsys/ncu para profiling dedicado' \
@@ -169,6 +187,7 @@ help:
 		'  VLLM_MODEL_DIR, VLLM_CONFIG, VLLM_LAUNCH' \
 		'  LLAMA_MODEL_DIR, LLAMA_CONFIG, LLAMA_LAUNCH' \
 		'  OLLAMA_MODEL_DIR, OLLAMA_CONFIG, OLLAMA_LAUNCH' \
+		'  PROMETHEUS_RUNTIME_TARGET=127.0.0.1:8000 inclui /metrics do runtime' \
 		'  POD_SSH, POD_PORT, POD_SSH_KEY, REMOTE_RESULTS_DIR, LOCAL_RESULTS_DIR'
 
 
@@ -220,6 +239,39 @@ install-benchmark:
 	"$(PYTHON)" -m pip install --disable-pip-version-check --upgrade pip
 	"$(PYTHON)" -m pip install --disable-pip-version-check -r requirements.txt
 	"$(PYTHON)" -m pip check
+
+prometheus-install:
+	@echo '[PROMETHEUS] criando/validando ambiente leve: $(BENCH_VENV)'
+	@test -x "$(PYTHON)" || "$(SYSTEM_PYTHON)" -m venv "$(BENCH_VENV)"
+	"$(PYTHON)" -m pip install --disable-pip-version-check -r requirements-prometheus.txt
+	$(PYTHON) scripts/install_prometheus.py \
+		--version "$(PROMETHEUS_VERSION)" \
+		--sha256 "$(PROMETHEUS_SHA256)" \
+		--destination "$(PROMETHEUS_INSTALL_DIR)"
+
+prometheus-start: prometheus-install
+	$(PYTHON) scripts/prometheus_stack.py start \
+		--prometheus-bin "$(PROMETHEUS_BIN)" \
+		--python "$(PYTHON)" \
+		--state-dir "$(PROMETHEUS_STATE_DIR)" \
+		--prometheus-host "$(PROMETHEUS_HOST)" --prometheus-port "$(PROMETHEUS_PORT)" \
+		--exporter-host "$(PROMETHEUS_EXPORTER_HOST)" --exporter-port "$(PROMETHEUS_EXPORTER_PORT)" \
+		--scrape-interval "$(PROMETHEUS_SCRAPE_INTERVAL)" --scrape-timeout "$(PROMETHEUS_SCRAPE_TIMEOUT)" \
+		--retention "$(PROMETHEUS_RETENTION)" \
+		$(if $(strip $(PROMETHEUS_RUNTIME_TARGET)),--runtime-metrics-target "$(PROMETHEUS_RUNTIME_TARGET)") \
+		--runtime-metrics-path "$(PROMETHEUS_RUNTIME_METRICS_PATH)"
+
+prometheus-stop:
+	$(SYSTEM_PYTHON) scripts/prometheus_stack.py stop \
+		--state-dir "$(PROMETHEUS_STATE_DIR)" \
+		--prometheus-host "$(PROMETHEUS_HOST)" --prometheus-port "$(PROMETHEUS_PORT)" \
+		--exporter-host "$(PROMETHEUS_EXPORTER_HOST)" --exporter-port "$(PROMETHEUS_EXPORTER_PORT)"
+
+prometheus-status:
+	$(SYSTEM_PYTHON) scripts/prometheus_stack.py status \
+		--state-dir "$(PROMETHEUS_STATE_DIR)" \
+		--prometheus-host "$(PROMETHEUS_HOST)" --prometheus-port "$(PROMETHEUS_PORT)" \
+		--exporter-host "$(PROMETHEUS_EXPORTER_HOST)" --exporter-port "$(PROMETHEUS_EXPORTER_PORT)"
 
 download-model: install-benchmark
 	@echo '[PREPARE] baixando GGUF $(MODEL_SIZE): $(HF_GGUF_REPO)'
@@ -532,7 +584,11 @@ quick-sweep-ollama: kv-sweep-ollama
 
 pull-results:
 	@test -n "$(POD_SSH)" || { echo 'Informe POD_SSH, por exemplo: POD_SSH=root@pod-host'; exit 1; }
-	@test -f "$(POD_SSH_KEY)" || { echo "Chave SSH ausente: $(POD_SSH_KEY). Use POD_SSH_KEY=/caminho/chave"; exit 1; }
+	ssh_key_args=()
+	if test -n "$(POD_SSH_KEY)"; then \
+		test -f "$(POD_SSH_KEY)" || { echo "Chave SSH ausente: $(POD_SSH_KEY). Use POD_SSH_KEY=/caminho/chave"; exit 1; }; \
+		ssh_key_args=(-i "$(POD_SSH_KEY)"); \
+	fi
 	mkdir -p "$(LOCAL_RESULTS_DIR)"
 	echo "[DOWNLOAD] $(POD_SSH):$(REMOTE_RESULTS_DIR) -> $(LOCAL_RESULTS_DIR)"
 	if [[ "$(POD_SSH)" == *ssh.runpod.io* ]]; then
@@ -546,7 +602,7 @@ pull-results:
 		sender_pid=''
 		cleanup() { test -z "$$sender_pid" || kill "$$sender_pid" 2>/dev/null || true; rm -rf "$$tmp_dir"; }
 		trap cleanup EXIT INT TERM
-		ssh -i "$(POD_SSH_KEY)" -p "$(POD_PORT)" "$(POD_SSH)" \
+		ssh "$${ssh_key_args[@]}" -p "$(POD_PORT)" "$(POD_SSH)" \
 			"tar -czf '$$archive_path' -C '$$remote_parent' '$$remote_base' && runpodctl send '$$archive_path'" \
 			>"$$log_file" 2>&1 &
 		sender_pid=$$!
@@ -566,7 +622,7 @@ pull-results:
 		wait "$$sender_pid"
 	else
 		command -v scp >/dev/null || { echo 'scp ausente no computador local'; exit 1; }
-		scp -i "$(POD_SSH_KEY)" -r -P "$(POD_PORT)" "$(POD_SSH):$(REMOTE_RESULTS_DIR)/." "$(LOCAL_RESULTS_DIR)/"
+		scp "$${ssh_key_args[@]}" -r -P "$(POD_PORT)" "$(POD_SSH):$(REMOTE_RESULTS_DIR)/." "$(LOCAL_RESULTS_DIR)/"
 	fi
 	echo "[DOWNLOAD] concluído; arquivos em $(LOCAL_RESULTS_DIR)"
 
@@ -580,3 +636,5 @@ docs:
 
 clean-info:
 	@printf 'Não há limpeza automática: pesos, GGUFs e resultados são evidências experimentais.\n'
+
+include observability.mk

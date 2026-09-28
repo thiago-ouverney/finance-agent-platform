@@ -1,5 +1,8 @@
 # Arquitetura
 
+> **Objetivo:** mostrar o fluxo entre `pipelines`, `services`, `analytics` e
+> `apps` e deixar explícita a responsabilidade de cada componente.
+
 ## Fluxo principal
 
 1. `pipelines/qwen-quantization` prepara e avalia os artefatos do Qwen.

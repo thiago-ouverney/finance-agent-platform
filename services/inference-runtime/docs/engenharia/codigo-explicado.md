@@ -1,5 +1,8 @@
 # O benchmark por dentro: guia detalhado do código
 
+> **Objetivo:** explicar como o cliente de medição executa, observa e registra
+> o benchmark sem confundi-lo com o runtime de inferência.
+
 Este documento explica a versão 0.4 para quem conhece estatística, mas não necessariamente programação de servidores ou GPUs. Leia junto com o [bench explicado](../benchmark/bench-explicado.md) e com os módulos Python do runtime. As explicações seguem funções e blocos lógicos; não são uma promessa de explicar uma operação de GPU que o cliente não observa.
 
 ## 1. Primeiro: o que este programa é — e o que não é
@@ -35,7 +38,7 @@ No modo `--launch`, o processo filho recebe `HF_HUB_OFFLINE=1` e `TRANSFORMERS_O
 
 `argparse` transforma opções de terminal em um objeto Python. `Path` manipula caminhos; `json` e `csv` gravam resultados; `subprocess` executa ferramentas locais; `threading` permite amostrar telemetria enquanto a inferência ocorre. `asyncio` roda a API assíncrona do GuideLLM. Isso **não implica** concorrência de inferência: o perfil escolhido continua síncrono.
 
-`ROOT` é a pasta do script, não necessariamente o diretório do terminal. `VERSION` identifica nosso cliente; `GUIDELLM_VERSION` fixa a versão testada. `WORKLOADS` mapeia nomes para aproximadamente 256/2048/8192 tokens de conteúdo. `OUTPUT_TOKENS=128` é o teto solicitado de saída, não uma garantia de 128 tokens produzidos.
+`ROOT` é a pasta do script, não necessariamente o diretório do terminal. `VERSION` identifica nosso cliente; `GUIDELLM_VERSION` fixa a versão testada. `NAMED_WORKLOADS` mapeia `short`, `medium` e `long` para 256/2048/7680 tokens. Em `replay`, são alvos do prompt completo estimado; em `independent`, do conteúdo sintético antes do template. `OUTPUT_TOKENS=128` é o teto solicitado de saída, não uma garantia de 128 tokens produzidos.
 
 ### `local_model_check(value)`
 
@@ -314,7 +317,7 @@ O código não mede qualidade semântica, energia total, FLOPs, banda física, t
 
 `summarize` mantém os campos históricos e acrescenta os aliases canônicos `time_to_first_token_milliseconds_*` e `tokens_per_second_*`. TTFT tem um valor por requisição; os percentis resumem a distribuição de requisições. Tokens/s é decode e não inclui TTFT. O Make usa short/medium/long por padrão e 50 requisições × 1 repetição fora do smoke.
 
-`run_conversational_batch` percorre os turnos da fixture de replay: com 50 requests e 50 turnos, cada chamada usa uma pergunta distinta e o histórico fixo até ela. A fase warmup recebe uma fixture separada, enquanto a medição usa `qwen_chat_bench_v2.json`; respostas produzidas pelo runtime nunca contaminam o replay. `scripts/run_kv_sweep.py` reinicia o servidor a cada ponto, converte `--memory-step-mb` para tokens usando `--kv-bytes-per-token`, altera o limite de contexto quando o runtime oferece uma flag (`--max-model-len` no vLLM, `--ctx-size` no llama-server) e guarda cada execução até a primeira falha. `make bench-vllm`, `make bench-llama` e `make bench-ollama` executam a bateria formal e o sweep; `make bench-all` coordena os três.
+`run_conversational_batch` ordena os turnos fixos pela proximidade do alvo do cenário. No `replay` nomeado, remove pares antigos quando o histórico passa do alvo e completa o `system` com contexto sintético determinístico quando fica abaixo. A estimativa, o alvo, a quantidade removida e o padding ficam nos artefatos; `usage.prompt_tokens` do runtime é a autoridade. A fase warmup recebe uma fixture separada, enquanto a medição usa `qwen_chat_bench_v2.json`; respostas produzidas pelo runtime nunca contaminam o replay. `scripts/run_kv_sweep.py` reinicia o servidor a cada ponto, converte `--memory-step-mb` para tokens usando `--kv-bytes-per-token`, altera o limite de contexto quando o runtime oferece uma flag (`--max-model-len` no vLLM, `--ctx-size` no llama-server) e guarda cada execução até a primeira falha. `make bench-vllm`, `make bench-llama` e `make bench-ollama` executam a bateria formal e o sweep; `make bench-all` coordena os três.
 
 ## 12. Referências e fontes numerados
 

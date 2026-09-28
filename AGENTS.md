@@ -1,5 +1,7 @@
 # Instruções do monorepo
 
+- Antes de analisar, planejar ou implementar qualquer alteração, leia `docs/README.md` como guia central do projeto.
+- Se uma decisão alterar fluxos, contratos, ambientes, convenções ou qualquer outra informação registrada nesse guia, explicite o impacto e alinhe com o responsável a decisão tomada e se `docs/README.md` será atualizado; não deixe código e guia divergirem silenciosamente.
 - Preserve os limites entre `apps`, `services` e `pipelines`.
 - Nunca versione credenciais, sessões do WhatsApp, pesos de modelos ou resultados brutos.
 - Execute os testes do componente alterado antes de integrar mudanças.

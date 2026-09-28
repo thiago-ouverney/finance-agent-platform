@@ -1,5 +1,8 @@
 # Operação do WhatsApp com Ollama na UFF
 
+> **Objetivo:** iniciar, verificar e diagnosticar o atendimento do WhatsApp
+> usando o adapter local e o Ollama privado da UFF pela ponte `uff-delta`.
+
 Este runbook descreve como iniciar e testar o fluxo operacional do chat:
 
 ```text
@@ -30,52 +33,14 @@ indica a máquina pessoal. Para sair da UFF e voltar ao terminal local, use
 
 ## 1. Configurar o alias SSH `uff-delta`
 
-A configuração fica em `~/.ssh/config` na máquina pessoal e não deve ser
-versionada no repositório. Crie ou edite o arquivo com os dados fornecidos pela
-UFF:
-
-```sshconfig
-Host uff-delta
-    HostName <host-ou-ip-da-uff>
-    User <usuario-da-uff>
-    Port <porta-ssh>
-    ServerAliveInterval 30
-    ServerAliveCountMax 3
-```
-
-Proteja o arquivo e teste o alias:
+Siga o guia canônico [Configurar SSH e abrir
+pontes](guias/configurar-ssh.md). Ao terminar, confirme na máquina local:
 
 ```bash
-chmod 600 ~/.ssh/config
 ssh uff-delta
 ```
 
-Se a conexão pedir senha, o túnel pode ser usado manualmente mesmo assim. Para
-evitar a senha em cada conexão, cadastre uma chave pública. Se já existir uma
-chave adequada, não gere nem sobrescreva outra:
-
-```bash
-ls -l ~/.ssh/*.pub
-ssh-copy-id -i ~/.ssh/id_ed25519.pub uff-delta
-ssh uff-delta
-```
-
-Se não houver uma chave, crie uma dedicada:
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_uff -C "uff-delta"
-ssh-copy-id -i ~/.ssh/id_ed25519_uff.pub uff-delta
-```
-
-Nesse caso, acrescente ao bloco `Host uff-delta`:
-
-```sshconfig
-    IdentityFile ~/.ssh/id_ed25519_uff
-    IdentitiesOnly yes
-```
-
-Nunca coloque a senha SSH, uma chave privada ou os dados reais do host em um
-arquivo versionado.
+Não prossiga enquanto o alias não abrir a UFF correta.
 
 ## 2. Verificar Ollama, modelo e GPU na UFF
 

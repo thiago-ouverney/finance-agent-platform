@@ -55,9 +55,13 @@ class Launch:
         self.log = artifact(self.output, "server.log").open("w", encoding="utf-8")
         self.started = time.perf_counter()
         try:
+            child_environment = dict(os.environ)
+            for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "BENCH_API_KEY"):
+                child_environment.pop(name, None)
+            child_environment.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
             self.process = subprocess.Popen(self.argv, stdout=self.log, stderr=subprocess.STDOUT,
                                             start_new_session=True, shell=False,
-                                            env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+                                            env=child_environment)
         except BaseException:
             self.log.close()
             raise
@@ -151,7 +155,9 @@ def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
               "content_event_offsets_s": [], "output": "", "done": False,
               "ttft_ms": None, "e2e_s": None, "mean_itl_ms": None,
               "usage_observed": False, "request_start_time": None,
-              "first_token_time": None, "request_end_time": None,
+              "first_token_time": None, "last_token_time": None, "request_end_time": None,
+              "request_start_epoch_s": None, "first_content_epoch_s": None,
+              "last_content_epoch_s": None, "request_end_epoch_s": None,
               "time_to_first_token_seconds": None, "generation_time_seconds": None,
               "end_to_end_latency_seconds": None, "completion_tokens": None,
               "prompt_tokens": None, "total_tokens": None,
@@ -161,8 +167,10 @@ def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
     started = None
     try:
         with httpx.Client(timeout=timeout, headers=headers, follow_redirects=False) as client:
+            started_epoch = time.time()
             started = time.perf_counter()
             result["request_start_time"] = started
+            result["request_start_epoch_s"] = started_epoch
             with client.stream("POST", cfg["base_url"] + "/v1/chat/completions", json=body) as stream:
                 result["headers_ms"] = (time.perf_counter() - started) * 1000
                 stream.raise_for_status()
@@ -186,12 +194,15 @@ def timed_request(cfg, secret, timeout, prompt, output, process_origin=None):
                         result["output"] += text
                         result["first_token_time"] = result["first_token_time"] or now
                         result["last_token_time"] = now
+                        result["first_content_epoch_s"] = result["first_content_epoch_s"] or started_epoch + (now - started)
+                        result["last_content_epoch_s"] = started_epoch + (now - started)
                         if result["ttft_ms"] is None:
                             result["ttft_ms"] = (now - started) * 1000
                             if process_origin is not None:
                                 result["process_to_first_content_s"] = now - process_origin
             ended = time.perf_counter()
             result["request_end_time"] = ended
+            result["request_end_epoch_s"] = started_epoch + (ended - started)
             result["e2e_s"] = ended - started
             result["end_to_end_latency_seconds"] = ended - started
             if process_origin is not None:

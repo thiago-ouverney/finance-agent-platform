@@ -1,5 +1,8 @@
 # Revisão de privacidade para publicação
 
+> **Objetivo:** registrar o escopo, as verificações e os limites da revisão de
+> privacidade feita antes da publicação do benchmark.
+
 Escopo: código do benchmark, testes, configurações de exemplo e materiais autorais de RunPod/vLLM, arquitetura, memórias e chat. Não foram incluídos pesos, ambientes virtuais, resultados experimentais, caches, dados privados, o PDF da disciplina ou repositórios de terceiros.
 
 ## Verificações

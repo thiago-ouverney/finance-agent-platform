@@ -2,6 +2,8 @@ PYTHON ?= python3
 ANALYTICS_VENV ?= analytics/.venv
 ANALYTICS_PYTHON := $(ANALYTICS_VENV)/bin/python
 RESULTS_DIR ?= services/inference-runtime/results
+OBSERVABILITY_RESULTS_DIR ?= services/inference-runtime/results-from-pod
+OBSERVABILITY_DATASET_DIR ?= analytics/data/runtime-observability
 BENCH_TARGET ?= bench-all
 BENCH_VARS ?=
 REMOTE_HOST ?=
@@ -21,6 +23,17 @@ EVAL_MODEL ?=
 EVAL_DATASET ?=
 EVAL_LIMIT ?=
 EVAL_SEED ?= 42
+SILVER_BASE_URL ?= http://127.0.0.1:18000/v1
+SILVER_MODEL ?= qwen-silver
+SILVER_MODEL_REVISION ?=
+SILVER_DATASET ?=
+SILVER_OUTPUT_DIR ?= analytics/results/mopep-silver/qwen
+SILVER_LIMIT ?=
+SILVER_SEED ?= 42
+SILVER_MAX_OUTPUT_TOKENS ?= 512
+SILVER_TIMEOUT_SECONDS ?= 180
+SILVER_MAX_ATTEMPTS ?= 3
+SILVER_RETRY_DELAY_SECONDS ?= 2
 QUANTIZATION_DIR ?= pipelines/qwen-quantization
 LOCAL_GOLDEN_DIR ?= analytics/results/mopep-golden-shareable
 REMOTE_GOLDEN_DIR ?= /workspace/data/mopep-golden
@@ -29,7 +42,7 @@ REMOTE_GOLDEN_PARENT = $(dir $(REMOTE_GOLDEN_DIR))
 .DEFAULT_GOAL := help
 
 .PHONY: help setup install test build verify test-whatsapp test-inference test-analytics check-quantization access-add \
-        setup-notebook notebook benchmark-dataset benchmark-tags predict-benchmark \
+        setup-notebook notebook observability-dataset observability-notebook openai-silver-notebook silver-qwen benchmark-dataset benchmark-tags predict-benchmark \
         benchmark-local benchmark-remote eval-tunnel eval-check eval-models eval-datasets eval-run \
         eval-results eval-consolidate push-quantization-data push-imatrix-train quantization-doctor quantization-setup \
         quantization-data-check smoke-quantize-model run-quantize-model verify-quantized-model \
@@ -67,6 +80,10 @@ help:
 		'' \
 		'Analytics e benchmarks:' \
 		'  make notebook                      Abre o notebook de analytics' \
+		'  make observability-dataset         Consolida os pacotes Prometheus baixados' \
+		'  make observability-notebook        Analisa o dataset temporal localmente' \
+		'  make openai-silver-notebook        Abre o notebook da silver GPT/Batch' \
+		'  make silver-qwen                   Gera a silver Qwen via API OpenAI-compatible' \
 		'  make benchmark-dataset             Consolida resultados dos benchmarks' \
 		'  make benchmark-tags                Gera tags para o dataset' \
 		'  make predict-benchmark             Treina o preditor de benchmark' \
@@ -164,6 +181,18 @@ setup-notebook:
 benchmark-dataset:
 	$(ANALYTICS_PYTHON) -m analytics.src.build_dataset --results "$(RESULTS_DIR)" --output analytics/data/benchmark_dataset.csv
 
+observability-dataset:
+	$(ANALYTICS_PYTHON) -m analytics.src.build_observability_dataset \
+		--results-dir "$(OBSERVABILITY_RESULTS_DIR)" \
+		--output-dir "$(OBSERVABILITY_DATASET_DIR)" --parquet
+
+observability-notebook:
+	@test -f "$(OBSERVABILITY_DATASET_DIR)/dataset-manifest.json" || { \
+		echo 'Dataset ausente; execute make observability-dataset primeiro.' >&2; exit 1; \
+	}
+	OBSERVABILITY_DATASET_DIR="$(abspath $(OBSERVABILITY_DATASET_DIR))" \
+		$(ANALYTICS_PYTHON) -m jupyter lab analytics/notebooks/analyze_runtime_observability.ipynb
+
 benchmark-tags:
 	$(ANALYTICS_PYTHON) -m analytics.src.generate_tags --input analytics/data/benchmark_dataset.csv --output analytics/data/benchmark_tagged.csv
 
@@ -171,7 +200,23 @@ predict-benchmark:
 	$(ANALYTICS_PYTHON) -m analytics.src.predict_benchmark --input analytics/data/benchmark_tagged.csv --output analytics/models/ttft.joblib
 
 notebook:
-	$(ANALYTICS_PYTHON) -m jupyter lab analytics/notebooks/benchmark-analysis.ipynb
+	$(ANALYTICS_PYTHON) -m jupyter lab analytics/notebooks/analyze_inference_benchmarks.ipynb
+
+openai-silver-notebook:
+	$(ANALYTICS_PYTHON) -m jupyter lab analytics/notebooks/generate_mopep_openai_silver.ipynb
+
+silver-qwen:
+	@test -n "$(SILVER_DATASET)" || { echo 'Informe SILVER_DATASET com o caminho do CSV.'; exit 1; }
+	$(ANALYTICS_PYTHON) -m analytics.src.generate_mopep_silver \
+		--base-url "$(SILVER_BASE_URL)" \
+		--model "$(SILVER_MODEL)" \
+		--dataset "$(SILVER_DATASET)" \
+		--output-root "$(SILVER_OUTPUT_DIR)" \
+		--seed "$(SILVER_SEED)" \
+		--max-output-tokens "$(SILVER_MAX_OUTPUT_TOKENS)" \
+		--timeout-seconds "$(SILVER_TIMEOUT_SECONDS)" \
+		--max-attempts "$(SILVER_MAX_ATTEMPTS)" \
+		--retry-delay-seconds "$(SILVER_RETRY_DELAY_SECONDS)" $(if $(SILVER_MODEL_REVISION),--model-revision "$(SILVER_MODEL_REVISION)") $(if $(SILVER_LIMIT),--limit "$(SILVER_LIMIT)")
 
 benchmark-local:
 	$(PYTHON) scripts/run_benchmark.py --mode local --target "$(BENCH_TARGET)" $(foreach item,$(BENCH_VARS),--set "$(item)")

@@ -1,4 +1,8 @@
 # Runtime - llama.cpp, Ollama, vLLM
+
+> **Objective:** describe the RunPod runtime template and its commands for
+> llama.cpp, Ollama, vLLM, and Hugging Face transfers.
+
 This is a complete runtime template featuring the 3 most popular LLM engines: [llama.cpp](https://github.com/ggml-org/llama.cpp), [Ollama](https://ollama.com/), and [vLLM](https://vllm.ai/). The template also has the Hugging Face CLI available for easy upload/download from its repository. If you intend to use Hugging Face, remember to set an HF_TOKEN environment variable.
 
 ## HF CLI

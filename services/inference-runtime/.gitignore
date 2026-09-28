@@ -1,4 +1,6 @@
 .venv/
+.tools/
+observability/.state/
 __pycache__/
 *.py[cod]
 .DS_Store
