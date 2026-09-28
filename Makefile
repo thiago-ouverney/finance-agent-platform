@@ -1,9 +1,22 @@
 PYTHON ?= python3
 ANALYTICS_VENV ?= analytics/.venv
 ANALYTICS_PYTHON := $(ANALYTICS_VENV)/bin/python
+INFERENCE_PYTHON ?= $(abspath services/inference-runtime/.venv/bin/python)
 RESULTS_DIR ?= services/inference-runtime/results
 OBSERVABILITY_RESULTS_DIR ?= services/inference-runtime/results-from-pod
 OBSERVABILITY_DATASET_DIR ?= analytics/data/runtime-observability
+MOPEP_PERF_SPLIT ?= calibration
+MOPEP_PERF_DATASET ?= $(LOCAL_GOLDEN_DIR)/$(MOPEP_PERF_SPLIT).csv
+MOPEP_PERF_WARMUP_DATASET ?= $(LOCAL_GOLDEN_DIR)/train.csv
+MOPEP_PERF_WORKLOAD_DIR ?= /tmp/mopep-runtime-workload/$(MOPEP_PERF_SPLIT)
+MOPEP_PERF_TOKENIZER ?= Qwen/Qwen2.5-7B-Instruct
+MOPEP_PERF_TOKENIZER_REVISION ?=
+MOPEP_PERF_THRESHOLD_MANIFEST ?=
+MOPEP_PERF_REMOTE_DIR ?= /workspace/data/mopep-runtime-workload/$(MOPEP_PERF_SPLIT)
+MOPEP_PERF_RESULTS_DIR ?= services/inference-runtime/results-from-pod
+MOPEP_PERF_DATASET_DIR ?= analytics/data/mopep-runtime-comparison
+MOPEP_PERF_GOLDEN ?= $(LOCAL_GOLDEN_DIR)/$(MOPEP_PERF_SPLIT).csv
+MOPEP_PERF_CANONICAL_RESPONSES ?=
 BENCH_TARGET ?= bench-all
 BENCH_VARS ?=
 REMOTE_HOST ?=
@@ -48,6 +61,8 @@ REMOTE_GOLDEN_PARENT = $(dir $(REMOTE_GOLDEN_DIR))
         quantization-data-check smoke-quantize-model run-quantize-model verify-quantized-model \
         upload-quantized-model
 
+.PHONY: mopep-performance-workload push-mopep-performance-workload mopep-performance-dataset mopep-performance-notebook
+
 help:
 	@printf '%s\n' \
 		'Finance Agent Platform — comandos disponíveis' \
@@ -82,6 +97,10 @@ help:
 		'  make notebook                      Abre o notebook de analytics' \
 		'  make observability-dataset         Consolida os pacotes Prometheus baixados' \
 		'  make observability-notebook        Analisa o dataset temporal localmente' \
+		'  make mopep-performance-workload     Gera workload privado short/medium/heavy' \
+		'  make push-mopep-performance-workload Envia workload privado ao Pod' \
+		'  make mopep-performance-dataset      Une qualidade MOPEP e observabilidade' \
+		'  make mopep-performance-notebook     Analisa qualidade e performance MOPEP' \
 		'  make openai-silver-notebook        Abre o notebook da silver GPT/Batch' \
 		'  make silver-qwen                   Gera a silver Qwen via API OpenAI-compatible' \
 		'  make benchmark-dataset             Consolida resultados dos benchmarks' \
@@ -119,7 +138,8 @@ test-whatsapp:
 	npm --prefix apps/whatsapp-adapter test
 
 test-inference:
-	cd services/inference-runtime && python -m unittest discover -s tests
+	@test -x "$(INFERENCE_PYTHON)" || { echo 'Ambiente do benchmark ausente; execute make -C services/inference-runtime install-benchmark prometheus-install.' >&2; exit 1; }
+	cd services/inference-runtime && "$(INFERENCE_PYTHON)" -m unittest discover -s tests
 
 check-quantization:
 	$(MAKE) -C $(QUANTIZATION_DIR) check SYSTEM_PYTHON="$(PYTHON)"
@@ -192,6 +212,34 @@ observability-notebook:
 	}
 	OBSERVABILITY_DATASET_DIR="$(abspath $(OBSERVABILITY_DATASET_DIR))" \
 		$(ANALYTICS_PYTHON) -m jupyter lab analytics/notebooks/analyze_runtime_observability.ipynb
+
+mopep-performance-workload:
+	@test -n "$(MOPEP_PERF_TOKENIZER_REVISION)" || { echo 'Informe MOPEP_PERF_TOKENIZER_REVISION com revisão imutável.' >&2; exit 2; }
+	$(ANALYTICS_PYTHON) -m analytics.src.build_mopep_runtime_workload \
+		--dataset "$(MOPEP_PERF_DATASET)" --warmup-dataset "$(MOPEP_PERF_WARMUP_DATASET)" \
+		--output-dir "$(MOPEP_PERF_WORKLOAD_DIR)" --split "$(MOPEP_PERF_SPLIT)" \
+		--tokenizer "$(MOPEP_PERF_TOKENIZER)" --tokenizer-revision "$(MOPEP_PERF_TOKENIZER_REVISION)" \
+		$(if $(strip $(MOPEP_PERF_THRESHOLD_MANIFEST)),--threshold-manifest "$(MOPEP_PERF_THRESHOLD_MANIFEST)")
+
+push-mopep-performance-workload:
+	@test -n "$(REMOTE_HOST)" || { echo 'Informe REMOTE_HOST=runpod-qwen.' >&2; exit 1; }
+	@for name in workload.jsonl warmup.jsonl workload-manifest.json SHA256SUMS; do \
+		test -f "$(MOPEP_PERF_WORKLOAD_DIR)/$$name" || { echo "Arquivo ausente: $(MOPEP_PERF_WORKLOAD_DIR)/$$name" >&2; exit 1; }; \
+	done
+	@tar -C "$(MOPEP_PERF_WORKLOAD_DIR)" -czf - workload.jsonl warmup.jsonl workload-manifest.json SHA256SUMS | \
+		ssh $(QUANT_SSH_OPTIONS) "$(REMOTE_HOST)" \
+		"set -eu; umask 077; incoming=\$$(mktemp -d /tmp/mopep-runtime-workload.XXXXXX); trap 'rm -rf \"\$$incoming\"' 0 1 2 3 15; tar -xzf - -C \"\$$incoming\"; cd \"\$$incoming\"; sha256sum --check --strict SHA256SUMS; mkdir -p '$(MOPEP_PERF_REMOTE_DIR)'; chmod 600 workload.jsonl warmup.jsonl workload-manifest.json SHA256SUMS; cp workload.jsonl warmup.jsonl workload-manifest.json SHA256SUMS '$(MOPEP_PERF_REMOTE_DIR)/'"
+
+mopep-performance-dataset: observability-dataset
+	$(ANALYTICS_PYTHON) -m analytics.src.build_mopep_runtime_comparison \
+		--results-dir "$(MOPEP_PERF_RESULTS_DIR)" --observability-dir "$(OBSERVABILITY_DATASET_DIR)" \
+		--golden "$(MOPEP_PERF_GOLDEN)" --output-dir "$(MOPEP_PERF_DATASET_DIR)" \
+		$(if $(strip $(MOPEP_PERF_CANONICAL_RESPONSES)),--canonical-responses "$(MOPEP_PERF_CANONICAL_RESPONSES)")
+
+mopep-performance-notebook:
+	@test -f "$(MOPEP_PERF_DATASET_DIR)/dataset-manifest.json" || { echo 'Execute make mopep-performance-dataset primeiro.' >&2; exit 1; }
+	MOPEP_PERFORMANCE_DATASET_DIR="$(abspath $(MOPEP_PERF_DATASET_DIR))" \
+		$(ANALYTICS_PYTHON) -m jupyter lab analytics/notebooks/analyze_mopep_runtime_benchmark.ipynb
 
 benchmark-tags:
 	$(ANALYTICS_PYTHON) -m analytics.src.generate_tags --input analytics/data/benchmark_dataset.csv --output analytics/data/benchmark_tagged.csv

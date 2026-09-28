@@ -779,6 +779,9 @@ def _derive_comparison_identity(run: RunArtifact) -> None:
         ("platform",),
     )
     workload = {
+        "benchmark_profile": benchmark.get(
+            "benchmark_profile", final.get("benchmark_profile", "generic")
+        ),
         "smoke": benchmark.get("smoke", final.get("smoke")),
         "requests": benchmark.get("requests", final.get("requests")),
         "repetitions": benchmark.get("repetitions", final.get("repetitions")),
@@ -795,6 +798,7 @@ def _derive_comparison_identity(run: RunArtifact) -> None:
         "seed": benchmark.get("seed", final.get("seed")),
         "profile": benchmark.get("profile", final.get("profile")),
         "workload_contract": benchmark.get("workload", final.get("workload")),
+        "request_dataset": benchmark.get("request_dataset", final.get("request_dataset")),
         "conversation_fixture_sha256": _first_scalar(
             benchmark,
             ("conversation_fixture", "sha256"),
