@@ -9,6 +9,7 @@ endif
 
 WORKSPACE ?= /workspace
 SYSTEM_PYTHON ?= python3
+MAKE_BIN ?= make
 QUANT_VENV ?= $(WORKSPACE)/venvs/qwen-quantization
 QUANT_PYTHON ?= $(QUANT_VENV)/bin/python
 HF ?= $(QUANT_VENV)/bin/hf
@@ -39,13 +40,39 @@ QUANT_HF_PRIVATE ?= 1
 QUANT_HF_ALLOW_PUBLIC ?= 0
 QUANT_HF_REPLACE_EXISTING ?= 0
 
+GGUF_VENV ?= $(WORKSPACE)/venvs/qwen-gguf-imatrix
+GGUF_PYTHON ?= $(GGUF_VENV)/bin/python
+GGUF_LLAMA_CPP_DIR ?= $(WORKSPACE)/llama.cpp-imatrix
+GGUF_LLAMA_CPP_REVISION ?= ed7ac35e1ee49cb70e4dfa9f0a2ce39b0a5ec4ea
+GGUF_LLAMA_CPP_BUILD_DIR ?= $(GGUF_LLAMA_CPP_DIR)/build
+GGUF_CONVERT_REQUIREMENTS ?= $(GGUF_LLAMA_CPP_DIR)/requirements/requirements-convert_hf_to_gguf.txt
+GGUF_MODEL_PREFIX ?= Qwen2.5-7B-Instruct
+GGUF_OUTPUT_DIR ?= $(WORKSPACE)/models/$(GGUF_MODEL_PREFIX)-GGUF-comparison
+GGUF_CORPUS_DIR ?= $(WORKSPACE)/data/quantization/mopep-imatrix
+GGUF_CORPUS_FILE ?= $(GGUF_CORPUS_DIR)/train-chat-template.txt
+GGUF_CORPUS_MANIFEST ?= $(GGUF_CORPUS_DIR)/train-chat-template.manifest.json
+GGUF_SAMPLES ?= 256
+GGUF_SEED ?= 42
+GGUF_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
+GGUF_GPU_LAYERS ?= 99
+GGUF_CONTEXT ?= 512
+GGUF_BATCH ?= 512
+GGUF_UBATCH ?= 512
+GGUF_LOCK_FILE ?= $(QUANT_LOCK_FILE)
+GGUF_SMOKE_MODEL_DIR ?= $(WORKSPACE)/models/Qwen2.5-0.5B-Instruct-original
+GGUF_SMOKE_OUTPUT_DIR ?= $(WORKSPACE)/models/Qwen2.5-0.5B-Instruct-GGUF-imatrix-smoke
+GGUF_SMOKE_CORPUS_DIR ?= $(WORKSPACE)/data/quantization/mopep-imatrix-smoke
+
 export HF_HOME PIP_CACHE_DIR TMPDIR CUDA_VISIBLE_DEVICES
 
 .DEFAULT_GOAL := help
 
 .PHONY: help doctor setup preflight upload-preflight check-hf-token print-config download-model data-check \
         run-quantize-model smoke-quantize-model verify-quantized-model \
-        verify-for-upload upload-quantized-model test check
+        verify-for-upload upload-quantized-model \
+        gguf-doctor gguf-fetch-llama gguf-build-tools gguf-setup gguf-download-model \
+        gguf-data-check gguf-export-corpus gguf-smoke-build gguf-build-comparison gguf-verify-comparison \
+        _gguf-build-comparison-locked gguf-print-config test check
 
 help:
 	@printf '%s\n' \
@@ -59,13 +86,146 @@ help:
 		'  make verify-quantized-model     Verifica arquivos e recarrega o checkpoint' \
 		'  make upload-quantized-model     Publica somente a pasta validada no HF' \
 		'' \
+		'Comparacao GGUF com iMatrix (llama.cpp):' \
+		'  make gguf-doctor                Valida imagem CUDA devel e recursos do Pod' \
+		'  make gguf-setup                 Fixa llama.cpp e instala o conversor em venv separado' \
+		'  make gguf-smoke-build           Testa o fluxo inteiro com Qwen 0.5B e 8 exemplos' \
+		'  make gguf-build-comparison      Gera Q4 plain, Q4+iMatrix e Q8 a partir do mesmo BF16' \
+		'  make gguf-verify-comparison     Confere assinatura e SHA dos tres GGUF finais' \
+		'  make gguf-print-config          Mostra a configuracao sem segredos' \
+		'' \
 		'Variaveis principais:' \
 		'  QUANT_MODEL_ID, QUANT_MODEL_REVISION, QUANT_MODEL_DIR' \
 		'  QUANT_METHOD=gptq|awq|exl3, QUANT_BITS, QUANT_GROUP_SIZE' \
 		'  QUANT_DATASET, QUANT_SAMPLES, QUANT_SEED, QUANT_OUTPUT_DIR' \
 		'  QUANT_HF_REPO_ID, QUANT_HF_PRIVATE=1|0, HF_TOKEN (somente ambiente)' \
 		'  QUANT_HF_ALLOW_PUBLIC e QUANT_HF_REPLACE_EXISTING sao confirmacoes' \
-		'  QUANT_ENV_FILE pode apontar para um arquivo Make local sem segredos'
+		'  QUANT_ENV_FILE pode apontar para um arquivo Make local sem segredos' \
+		'  GGUF_OUTPUT_DIR, GGUF_LLAMA_CPP_REVISION, GGUF_SAMPLES e GGUF_THREADS'
+
+gguf-doctor:
+	@command -v "$(SYSTEM_PYTHON)" >/dev/null || { echo 'Python ausente' >&2; exit 1; }
+	@"$(SYSTEM_PYTHON)" -c 'import sys; assert (3, 11) <= sys.version_info < (3, 14), "Python 3.11-3.13 obrigatorio"; print("Python:", sys.version.split()[0])'
+	@for command in git cmake g++ nvcc nvidia-smi free df sha256sum flock; do command -v "$$command" >/dev/null || { echo "$$command ausente; use uma imagem NVIDIA CUDA devel" >&2; exit 1; }; done
+	@"$(SYSTEM_PYTHON)" -c 'import venv'
+	@[[ "$(GGUF_SAMPLES)" =~ ^[1-9][0-9]*$$ ]] || { echo 'GGUF_SAMPLES deve ser inteiro positivo' >&2; exit 2; }
+	@[[ "$(GGUF_SEED)" =~ ^[0-9]+$$ ]] || { echo 'GGUF_SEED deve ser inteiro nao negativo' >&2; exit 2; }
+	@for value in "$(GGUF_THREADS)" "$(GGUF_GPU_LAYERS)" "$(GGUF_CONTEXT)" "$(GGUF_BATCH)" "$(GGUF_UBATCH)"; do [[ "$$value" =~ ^[1-9][0-9]*$$ ]] || { echo "Parametro GGUF invalido: $$value" >&2; exit 2; }; done
+	@if test "$$(basename "$(QUANT_DATASET)")" = test.csv; then echo 'test.csv e reservado para avaliacao final' >&2; exit 2; fi
+	@nvidia-smi --query-gpu=index,name,driver_version,memory.total,memory.free --format=csv,noheader
+	@nvcc --version | tail -n 1
+	@printf 'RAM:\n'; free -h
+	@printf 'Disco em %s:\n' "$(WORKSPACE)"; df -h "$(WORKSPACE)"
+
+gguf-fetch-llama:
+	@mkdir -p "$(dir $(GGUF_LLAMA_CPP_DIR))"
+	@if test -e "$(GGUF_LLAMA_CPP_DIR)" && ! test -d "$(GGUF_LLAMA_CPP_DIR)/.git"; then echo 'GGUF_LLAMA_CPP_DIR existe e nao e um checkout Git valido' >&2; exit 1; fi
+	@if ! test -d "$(GGUF_LLAMA_CPP_DIR)/.git"; then \
+		mkdir -p "$(GGUF_LLAMA_CPP_DIR)"; \
+		git -C "$(GGUF_LLAMA_CPP_DIR)" init; \
+		git -C "$(GGUF_LLAMA_CPP_DIR)" remote add origin https://github.com/ggml-org/llama.cpp.git; \
+	fi
+	@origin="$$(git -C "$(GGUF_LLAMA_CPP_DIR)" remote get-url origin)"; \
+	case "$$origin" in https://github.com/ggml-org/llama.cpp.git|git@github.com:ggml-org/llama.cpp.git) ;; *) echo "Remote llama.cpp inesperado: $$origin" >&2; exit 1 ;; esac
+	@if ! test "$$(git -C "$(GGUF_LLAMA_CPP_DIR)" rev-parse HEAD 2>/dev/null || true)" = "$(GGUF_LLAMA_CPP_REVISION)"; then \
+		git -C "$(GGUF_LLAMA_CPP_DIR)" diff --quiet && git -C "$(GGUF_LLAMA_CPP_DIR)" diff --cached --quiet || { echo 'Checkout llama.cpp tem mudancas rastreadas; use outro diretorio' >&2; exit 1; }; \
+		git -C "$(GGUF_LLAMA_CPP_DIR)" fetch --depth=1 origin "$(GGUF_LLAMA_CPP_REVISION)"; \
+		git -C "$(GGUF_LLAMA_CPP_DIR)" checkout --detach FETCH_HEAD; \
+	fi
+	@test "$$(git -C "$(GGUF_LLAMA_CPP_DIR)" rev-parse HEAD)" = "$(GGUF_LLAMA_CPP_REVISION)" || { echo 'Falha ao fixar a revisao do llama.cpp' >&2; exit 1; }
+	@git -C "$(GGUF_LLAMA_CPP_DIR)" diff --quiet && git -C "$(GGUF_LLAMA_CPP_DIR)" diff --cached --quiet || { echo 'Checkout llama.cpp tem mudancas rastreadas; use outro diretorio' >&2; exit 1; }
+
+gguf-build-tools: gguf-doctor gguf-fetch-llama
+	@cmake -S "$(GGUF_LLAMA_CPP_DIR)" -B "$(GGUF_LLAMA_CPP_BUILD_DIR)" \
+		-DGGML_CUDA=ON -DLLAMA_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+	@cmake --build "$(GGUF_LLAMA_CPP_BUILD_DIR)" --config Release \
+		--target llama-imatrix llama-quantize llama-server -j"$(GGUF_THREADS)"
+	@test -x "$(GGUF_LLAMA_CPP_BUILD_DIR)/bin/llama-imatrix"
+	@test -x "$(GGUF_LLAMA_CPP_BUILD_DIR)/bin/llama-quantize"
+	@test -x "$(GGUF_LLAMA_CPP_BUILD_DIR)/bin/llama-server"
+
+gguf-setup: gguf-fetch-llama
+	@test -f "$(GGUF_CONVERT_REQUIREMENTS)" || { echo "Requirements do conversor ausente: $(GGUF_CONVERT_REQUIREMENTS)" >&2; exit 1; }
+	@mkdir -p "$(dir $(GGUF_VENV))" "$(HF_HOME)" "$(PIP_CACHE_DIR)" "$(TMPDIR)" "$(GGUF_CORPUS_DIR)" "$(dir $(GGUF_LOCK_FILE))" "$(WORKSPACE)/models"
+	@test -x "$(GGUF_PYTHON)" || "$(SYSTEM_PYTHON)" -m venv "$(GGUF_VENV)"
+	@revision="$$(git -C "$(GGUF_LLAMA_CPP_DIR)" rev-parse HEAD)"; stamp="$(GGUF_VENV)/.llama-cpp-revision"; \
+	if ! test -f "$$stamp" || ! test "$$(cat "$$stamp")" = "$$revision"; then \
+		"$(GGUF_PYTHON)" -m pip install --disable-pip-version-check --upgrade pip; \
+		"$(GGUF_PYTHON)" -m pip install --disable-pip-version-check -r "$(GGUF_CONVERT_REQUIREMENTS)"; \
+		"$(GGUF_PYTHON)" -m pip check; \
+		printf '%s\n' "$$revision" > "$$stamp"; \
+	else echo 'Dependencias do conversor ja correspondem ao commit fixado do llama.cpp'; fi
+	@"$(GGUF_PYTHON)" -c 'import huggingface_hub, transformers; print("huggingface_hub:", huggingface_hub.__version__); print("transformers:", transformers.__version__)'
+
+gguf-download-model: gguf-setup
+	@mkdir -p "$(QUANT_MODEL_DIR)"
+	@resolved="$$($(GGUF_PYTHON) -c 'import sys; from huggingface_hub import HfApi; print(HfApi().model_info(sys.argv[1], revision=sys.argv[2]).sha)' "$(QUANT_MODEL_ID)" "$(QUANT_MODEL_REVISION)")"; \
+	test -n "$$resolved" || { echo 'Nao foi possivel resolver a revisao do modelo' >&2; exit 1; }; \
+	if test -f "$(QUANT_MODEL_DIR)/.source_revision"; then existing="$$(cat "$(QUANT_MODEL_DIR)/.source_revision")"; test "$$existing" = "$$resolved" || { echo "Diretorio pertence a $$existing, mas a fonte resolveu para $$resolved" >&2; exit 1; }; fi; \
+	"$(GGUF_PYTHON)" -c 'import sys; from huggingface_hub import snapshot_download; snapshot_download(repo_id=sys.argv[1], revision=sys.argv[2], local_dir=sys.argv[3])' "$(QUANT_MODEL_ID)" "$$resolved" "$(QUANT_MODEL_DIR)"; \
+	printf '%s\n' "$$resolved" > "$(QUANT_MODEL_DIR)/.source_revision"
+
+gguf-data-check:
+	@"$(SYSTEM_PYTHON)" calibration.py "$(QUANT_DATASET)" --limit "$(GGUF_SAMPLES)" --seed "$(GGUF_SEED)"
+
+gguf-export-corpus: gguf-setup gguf-download-model gguf-data-check
+	@if test -e "$(GGUF_CORPUS_FILE)" || test -e "$(GGUF_CORPUS_MANIFEST)"; then \
+		test -f "$(GGUF_CORPUS_FILE)" && test -f "$(GGUF_CORPUS_MANIFEST)" || { echo 'Corpus imatrix parcial; inspecione os dois caminhos' >&2; exit 1; }; \
+		action=--verify-only; \
+	else action=; fi; \
+	"$(GGUF_PYTHON)" build_imatrix_corpus.py \
+		--dataset "$(QUANT_DATASET)" --tokenizer-dir "$(QUANT_MODEL_DIR)" \
+		--output "$(GGUF_CORPUS_FILE)" --manifest "$(GGUF_CORPUS_MANIFEST)" \
+		--limit "$(GGUF_SAMPLES)" --seed "$(GGUF_SEED)" $$action
+	@chmod 600 "$(GGUF_CORPUS_FILE)" "$(GGUF_CORPUS_MANIFEST)"
+
+gguf-build-comparison:
+	@mkdir -p "$(dir $(GGUF_LOCK_FILE))"
+	@exec 9>"$(GGUF_LOCK_FILE)"; \
+	flock -n 9 || { echo 'Outra quantizacao/verificacao esta ativa neste Pod; aguarde.' >&2; exit 1; }; \
+	"$(MAKE_BIN)" --no-print-directory -C "$(CURDIR)" _gguf-build-comparison-locked
+
+gguf-smoke-build:
+	@"$(MAKE_BIN)" --no-print-directory -C "$(CURDIR)" gguf-build-comparison \
+		QUANT_MODEL_ID=Qwen/Qwen2.5-0.5B-Instruct \
+		QUANT_MODEL_REVISION=main \
+		QUANT_MODEL_DIR="$(GGUF_SMOKE_MODEL_DIR)" \
+		GGUF_MODEL_PREFIX=Qwen2.5-0.5B-Instruct \
+		GGUF_OUTPUT_DIR="$(GGUF_SMOKE_OUTPUT_DIR)" \
+		GGUF_CORPUS_DIR="$(GGUF_SMOKE_CORPUS_DIR)" \
+		GGUF_CORPUS_FILE="$(GGUF_SMOKE_CORPUS_DIR)/train-chat-template.txt" \
+		GGUF_CORPUS_MANIFEST="$(GGUF_SMOKE_CORPUS_DIR)/train-chat-template.manifest.json" \
+		GGUF_SAMPLES=8
+	@"$(MAKE_BIN)" --no-print-directory -C "$(CURDIR)" gguf-verify-comparison \
+		GGUF_MODEL_PREFIX=Qwen2.5-0.5B-Instruct \
+		GGUF_OUTPUT_DIR="$(GGUF_SMOKE_OUTPUT_DIR)"
+
+_gguf-build-comparison-locked: gguf-doctor gguf-build-tools gguf-setup gguf-download-model gguf-export-corpus
+	@mkdir -p "$(GGUF_OUTPUT_DIR)"
+	@"$(GGUF_PYTHON)" build_gguf_comparison.py \
+		--llama-cpp-dir "$(GGUF_LLAMA_CPP_DIR)" --llama-cpp-build-dir "$(GGUF_LLAMA_CPP_BUILD_DIR)" \
+		--llama-cpp-revision "$(GGUF_LLAMA_CPP_REVISION)" \
+		--hf-model-dir "$(QUANT_MODEL_DIR)" --source-model-id "$(QUANT_MODEL_ID)" \
+		--corpus "$(GGUF_CORPUS_FILE)" --corpus-manifest "$(GGUF_CORPUS_MANIFEST)" \
+		--output-dir "$(GGUF_OUTPUT_DIR)" --prefix "$(GGUF_MODEL_PREFIX)" \
+		--python "$(GGUF_PYTHON)" --threads "$(GGUF_THREADS)" --gpu-layers "$(GGUF_GPU_LAYERS)" \
+		--context "$(GGUF_CONTEXT)" --batch "$(GGUF_BATCH)" --ubatch "$(GGUF_UBATCH)"
+
+gguf-verify-comparison:
+	@mkdir -p "$(dir $(GGUF_LOCK_FILE))"
+	@exec 9>"$(GGUF_LOCK_FILE)"; \
+	flock -n 9 || { echo 'Outra quantizacao/verificacao esta ativa neste Pod; aguarde.' >&2; exit 1; }; \
+	"$(SYSTEM_PYTHON)" build_gguf_comparison.py --verify-only \
+		--output-dir "$(GGUF_OUTPUT_DIR)" --prefix "$(GGUF_MODEL_PREFIX)"
+
+gguf-print-config:
+	@printf '%s\n' \
+		"SOURCE_MODEL=$(QUANT_MODEL_ID)" "SOURCE_REVISION_SELECTOR=$(QUANT_MODEL_REVISION)" \
+		"SOURCE_DIR=$(QUANT_MODEL_DIR)" "DATASET=$(QUANT_DATASET)" \
+		"SAMPLES=$(GGUF_SAMPLES)" "SEED=$(GGUF_SEED)" \
+		"LLAMA_CPP_DIR=$(GGUF_LLAMA_CPP_DIR)" "LLAMA_CPP_REVISION=$(GGUF_LLAMA_CPP_REVISION)" \
+		"CORPUS=$(GGUF_CORPUS_FILE)" "OUTPUT_DIR=$(GGUF_OUTPUT_DIR)" \
+		"THREADS=$(GGUF_THREADS)" "GPU_LAYERS=$(GGUF_GPU_LAYERS)"
 
 doctor:
 	@command -v "$(SYSTEM_PYTHON)" >/dev/null || { echo 'Python ausente' >&2; exit 1; }
@@ -243,4 +403,5 @@ test:
 	@"$(SYSTEM_PYTHON)" -m unittest discover -s tests -p 'test_*.py'
 
 check: test
-	@"$(SYSTEM_PYTHON)" -m py_compile calibration.py quantize.py verify_artifact.py publish_model.py benchmark.py perplexity.py
+	@"$(SYSTEM_PYTHON)" -m py_compile calibration.py quantize.py verify_artifact.py publish_model.py \
+		build_imatrix_corpus.py build_gguf_comparison.py benchmark.py perplexity.py

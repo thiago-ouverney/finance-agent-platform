@@ -31,7 +31,7 @@ REMOTE_GOLDEN_PARENT = $(dir $(REMOTE_GOLDEN_DIR))
 .PHONY: help setup install test build verify test-whatsapp test-inference test-analytics check-quantization access-add \
         setup-notebook notebook benchmark-dataset benchmark-tags predict-benchmark \
         benchmark-local benchmark-remote eval-tunnel eval-check eval-models eval-datasets eval-run \
-        eval-results eval-consolidate push-quantization-data quantization-doctor quantization-setup \
+        eval-results eval-consolidate push-quantization-data push-imatrix-train quantization-doctor quantization-setup \
         quantization-data-check smoke-quantize-model run-quantize-model verify-quantized-model \
         upload-quantized-model
 
@@ -56,6 +56,7 @@ help:
 		'' \
 		'Quantização no RunPod:' \
 		'  make push-quantization-data         Envia os CSVs privados ao Pod por SSH' \
+		'  make push-imatrix-train             Envia somente train.csv para o build GGUF/iMatrix' \
 		'  make quantization-doctor            Diagnostica GPU, disco, RAM e HF_TOKEN' \
 		'  make quantization-setup             Instala o ambiente persistente no Pod' \
 		'  make quantization-data-check        Valida o golden e a amostra escolhida' \
@@ -118,6 +119,17 @@ push-quantization-data:
 	tar -C "$$transfer_dir" -czf - train.csv calibration.csv test.csv SHA256SUMS | \
 		ssh $(QUANT_SSH_OPTIONS) "$(REMOTE_HOST)" \
 		"set -eu; umask 077; mkdir -p '$(REMOTE_GOLDEN_PARENT)'; incoming=\$$(mktemp -d '$(REMOTE_GOLDEN_PARENT)mopep-golden-transfer.XXXXXX'); trap 'rm -rf \"\$$incoming\"' 0 1 2 3 15; tar -xzf - -C \"\$$incoming\"; cd \"\$$incoming\"; sha256sum --check --strict SHA256SUMS; chmod 600 train.csv calibration.csv test.csv; mkdir -p '$(REMOTE_GOLDEN_DIR)'; mv train.csv calibration.csv test.csv '$(REMOTE_GOLDEN_DIR)/'; sha256sum '$(REMOTE_GOLDEN_DIR)'/*.csv; cd /; rm -f \"\$$incoming/SHA256SUMS\"; rmdir \"\$$incoming\"; trap - 0 1 2 3 15"
+
+push-imatrix-train:
+	@test -n "$(REMOTE_HOST)" || { echo 'Informe REMOTE_HOST=runpod-qwen.' >&2; exit 1; }
+	@test -f "$(LOCAL_GOLDEN_DIR)/train.csv" || { echo 'Arquivo ausente: $(LOCAL_GOLDEN_DIR)/train.csv' >&2; exit 1; }
+	@transfer_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$transfer_dir"' 0 1 2 3 15; \
+	cp "$(LOCAL_GOLDEN_DIR)/train.csv" "$$transfer_dir/"; \
+	(cd "$$transfer_dir" && sha256sum train.csv > SHA256SUMS); \
+	tar -C "$$transfer_dir" -czf - train.csv SHA256SUMS | \
+		ssh $(QUANT_SSH_OPTIONS) "$(REMOTE_HOST)" \
+		"set -eu; umask 077; mkdir -p '$(REMOTE_GOLDEN_PARENT)'; incoming=\$$(mktemp -d '$(REMOTE_GOLDEN_PARENT)mopep-imatrix-transfer.XXXXXX'); trap 'rm -rf \"\$$incoming\"' 0 1 2 3 15; tar -xzf - -C \"\$$incoming\"; cd \"\$$incoming\"; sha256sum --check --strict SHA256SUMS; chmod 600 train.csv; mkdir -p '$(REMOTE_GOLDEN_DIR)'; mv train.csv '$(REMOTE_GOLDEN_DIR)/train.csv'; sha256sum '$(REMOTE_GOLDEN_DIR)/train.csv'; cd /; rm -f \"\$$incoming/SHA256SUMS\"; rmdir \"\$$incoming\"; trap - 0 1 2 3 15"
 
 quantization-doctor:
 	$(MAKE) -C $(QUANTIZATION_DIR) doctor
