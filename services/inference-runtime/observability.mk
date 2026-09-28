@@ -29,10 +29,16 @@ OBS_BENCH_REQUESTS ?= 20
 OBS_BENCH_REPETITIONS ?= 1
 OBS_BENCH_WARMUP ?= 3
 OBS_BENCH_MODE ?= replay
+OBS_BENCH_PROFILE ?= generic
 OBS_BENCH_CONVERSATION_TURNS ?= 1
 OBS_BENCH_SMOKE ?= 0
+OBS_REQUEST_DATASET ?=
+OBS_WARMUP_REQUEST_DATASET ?=
+OBS_REQUEST_MANIFEST ?=
+OBS_REPLAY_RESPONSES ?=
+OBS_RESPONSES_OUT ?=
 OBS_REMOTE_HOST ?=
-OBS_REMOTE_PORT ?= 22
+OBS_REMOTE_PORT ?=
 OBS_REMOTE_KEY ?=
 OBS_REMOTE_RESULTS_DIR ?= /workspace/finance-agent-platform/services/inference-runtime/results
 OBS_LOCAL_RESULTS_DIR ?= results-from-pod
@@ -151,6 +157,13 @@ observe-check-model-source: observe-check-runtime
 	@test -n "$(OBS_MODEL)" || { echo 'Informe OBS_MODEL com repo HF ou caminho local.' >&2; exit 2; }
 	@if test "$(OBS_RUNTIME)" = ollama; then test -n "$(OBS_OLLAMA_VERSION)" || { echo 'OBS_OLLAMA_VERSION exata é obrigatória.' >&2; exit 2; }; fi
 	@case "$(OBS_BENCH_SMOKE)" in 0|1) ;; *) echo 'OBS_BENCH_SMOKE deve ser 0 ou 1.' >&2; exit 2 ;; esac
+	@case "$(OBS_BENCH_PROFILE)" in generic|mopep-single|mopep-review-replay|mopep-review-closed-loop) ;; *) echo 'OBS_BENCH_PROFILE inválido.' >&2; exit 2 ;; esac
+	@if test "$(OBS_BENCH_PROFILE)" != generic; then \
+		test -n "$(OBS_REQUEST_DATASET)" -a -n "$(OBS_WARMUP_REQUEST_DATASET)" -a -n "$(OBS_REQUEST_MANIFEST)" || { echo 'Perfil MOPEP exige OBS_REQUEST_DATASET, OBS_WARMUP_REQUEST_DATASET e OBS_REQUEST_MANIFEST.' >&2; exit 2; }; \
+	fi
+	@if test "$(OBS_BENCH_PROFILE)" = mopep-review-replay; then \
+		test -n "$(OBS_REPLAY_RESPONSES)" || { echo 'mopep-review-replay exige OBS_REPLAY_RESPONSES.' >&2; exit 2; }; \
+	fi
 
 observe-system-install:
 	@command -v apt-get >/dev/null || { echo 'Este alvo requer uma imagem Ubuntu/Debian.' >&2; exit 1; }
@@ -179,6 +192,7 @@ observe-install: observe-check-runtime
 	@$(MAKE) --no-print-directory "observe-install-$(OBS_RUNTIME)"
 
 observe-install-vllm:
+	@command -v ninja >/dev/null || { echo 'ninja ausente; execute make observe-system-install ou apt-get install -y ninja-build.' >&2; exit 1; }
 	@mkdir -p "$(OBS_VENVS_DIR)"
 	@test -x "$(OBS_VLLM_PYTHON)" || "$(OBS_SYSTEM_PYTHON)" -m venv "$(OBS_VLLM_VENV)"
 	"$(OBS_VLLM_PYTHON)" -m pip install --disable-pip-version-check --upgrade pip uv
@@ -398,6 +412,12 @@ observe-bench: observe-bench-prepare
 		$(if $(strip $(OBS_BENCH_INPUT_TOKENS)),--input-tokens $(OBS_BENCH_INPUT_TOKENS),--scenarios $(OBS_BENCH_SCENARIOS)) \
 		--requests "$(OBS_BENCH_REQUESTS)" --repetitions "$(OBS_BENCH_REPETITIONS)" \
 		--warmup "$(OBS_BENCH_WARMUP)" --mode "$(OBS_BENCH_MODE)" \
+		--benchmark-profile "$(OBS_BENCH_PROFILE)" \
+		$(if $(strip $(OBS_REQUEST_DATASET)),--request-dataset "$(OBS_REQUEST_DATASET)") \
+		$(if $(strip $(OBS_WARMUP_REQUEST_DATASET)),--warmup-request-dataset "$(OBS_WARMUP_REQUEST_DATASET)") \
+		$(if $(strip $(OBS_REQUEST_MANIFEST)),--request-manifest "$(OBS_REQUEST_MANIFEST)") \
+		$(if $(strip $(OBS_REPLAY_RESPONSES)),--replay-responses "$(OBS_REPLAY_RESPONSES)") \
+		$(if $(strip $(OBS_RESPONSES_OUT)),--responses-out "$(OBS_RESPONSES_OUT)") \
 		--conversation-turns "$(OBS_BENCH_CONVERSATION_TURNS)" \
 		--conversation-fixture "$(CONVERSATION_FIXTURE)" \
 		--warmup-conversation-fixture "$(WARMUP_CONVERSATION_FIXTURE)" \

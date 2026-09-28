@@ -1,5 +1,6 @@
 """Teste HTTP/SSE local com GuideLLM real; não usa GPU nem mede um modelo real."""
 import json
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
@@ -120,8 +121,12 @@ def main():
             assert (result.parent / "gpu-summary.json").exists()
             csv_dir = result.parents[1] / "csv"
             html_dir = result.parents[1] / "html"
-            assert (html_dir / "telemetry-memory.svg").exists()
-            assert (html_dir / "telemetry-gpu-util.svg").exists()
+            gpu_lines = (csv_dir / "gpu.csv").read_text().splitlines()
+            if len(gpu_lines) > 1:
+                assert (html_dir / "telemetry-memory.svg").exists()
+                assert (html_dir / "telemetry-gpu-util.svg").exists()
+            else:
+                assert (result.parent / "gpu-unavailable.json").exists()
             kv = (csv_dir / "kv-cache.csv").read_text()
             assert "vllm:kv_cache_usage_perc" in kv, kv
             assert "vllm:gpu_cache_usage_perc" not in kv, kv
@@ -138,6 +143,57 @@ def main():
             assert json.loads((result.parent / "manifest.json").read_text())["status"] == "complete"
             print("PASS: primeira resposta + 3 warmups + 3 medidas distintas + referência final; concorrência máxima = 1.", flush=True)
             assert (csv_dir / "r1-short-measure-requests.csv").exists()
+            workload_dir = folder / "mopep-workload"
+            workload_dir.mkdir()
+            workload_rows = [
+                {"request_id": f"bmc-{index}", "bucket": bucket,
+                 "rendered_prompt_tokens": 100 + index,
+                 "initial_messages": [{"role": "user", "content": f"classifique {index}"}],
+                 "review_instruction": "revise e retorne somente a lista"}
+                for index, bucket in enumerate(("short", "medium"), 1)
+            ]
+            warmup_rows = [{"request_id": "warmup-1", "bucket": "short",
+                            "rendered_prompt_tokens": 50,
+                            "initial_messages": [{"role": "user", "content": "aquecimento"}],
+                            "review_instruction": "revise"}]
+            workload_path = workload_dir / "workload.jsonl"
+            warmup_path = workload_dir / "warmup.jsonl"
+            workload_path.write_text("".join(json.dumps(row) + "\n" for row in workload_rows))
+            warmup_path.write_text("".join(json.dumps(row) + "\n" for row in warmup_rows))
+            digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+            manifest_path = workload_dir / "workload-manifest.json"
+            manifest_path.write_text(json.dumps({
+                "schema_version": 1, "dataset_sha256": "d" * 64,
+                "workload_sha256": digest(workload_path), "warmup_sha256": digest(warmup_path),
+                "request_order_sha256": "o" * 64, "prompt_sha256": "p" * 64,
+                "review_prompt_sha256": "r" * 64,
+                "bucket_thresholds": {"short_max_tokens": 100, "medium_max_tokens": 200},
+            }))
+            mopep_config = folder / "mopep-config.json"
+            cfg["runtime"] = "llama"
+            mopep_config.write_text(json.dumps(cfg))
+            canonical = workload_dir / "canonical.jsonl"
+            for profile in ("mopep-single", "mopep-review-replay", "mopep-review-closed-loop"):
+                state.update(mode="success", bodies=[])
+                command = [sys.executable, str(ROOT / "bench.py"), "run", "--config", str(mopep_config),
+                           "--local-model-path", str(folder / "mock.gguf"), "--smoke",
+                           "--benchmark-profile", profile,
+                           "--request-dataset", str(workload_path),
+                           "--warmup-request-dataset", str(warmup_path),
+                           "--request-manifest", str(manifest_path),
+                           "--results", str(folder / f"results-{profile}")]
+                if profile == "mopep-single":
+                    command.extend(["--responses-out", str(canonical)])
+                if profile == "mopep-review-replay":
+                    command.extend(["--replay-responses", str(canonical)])
+                proc = subprocess.run(command, capture_output=True, text=True, timeout=180)
+                assert proc.returncode == 0, proc.stdout + proc.stderr
+                response_artifact = next((folder / f"results-{profile}").glob("**/text/responses.jsonl"))
+                response_rows = [json.loads(line) for line in response_artifact.read_text().splitlines()]
+                expected = 6 if profile == "mopep-review-closed-loop" else 3
+                assert len(response_rows) == expected, (profile, response_rows)
+                assert state["maximum"] == 1
+            print("PASS: perfis MOPEP single, replay e closed-loop executados sequencialmente.")
             for mode in ("failure", "missing_usage"):
                 state.update(mode=mode, bodies=[])
                 proc = subprocess.run([sys.executable, str(ROOT / "bench.py"), "run", "--config", str(folder / "config.json"),

@@ -74,6 +74,17 @@ A carga usa `OBS_BENCH_SCENARIOS`, `OBS_BENCH_REQUESTS`,
 `OBS_BENCH_REPETITIONS`, `OBS_BENCH_WARMUP` e `OBS_BENCH_MODE`.
 `OBS_RESULTS_DIR` define a raiz dos pacotes.
 
+`OBS_BENCH_PROFILE` mantém `generic` como padrão e aceita os perfis MOPEP
+`mopep-single`, `mopep-review-replay` e `mopep-review-closed-loop`. Eles exigem
+dataset, warm-up e manifesto; replay também exige respostas canônicas. O
+[contrato MOPEP](workload-mopep.md) define hashes, turnos e comparabilidade.
+
+No `generic`, `short`, `medium` e `long` são cenários sintéticos com alvos de
+256, 2048 e 7680 tokens e fonte `qwen_chat_bench_v2.json`; nenhum BMC é lido.
+No MOPEP, BMCs reais permanecem íntegros e recebem os buckets `short`, `medium`
+e `heavy` pelos tercis calculados na calibração. Não consolide os dois perfis
+como se representassem a mesma carga.
+
 Tokens privados do Hugging Face são lidos do ambiente e não podem aparecer em
 linha versionada, manifesto ou resultado.
 
@@ -185,7 +196,9 @@ make observability-notebook
 ```
 
 `pull-observe-results` não apaga o pacote remoto nem o local. O consolidado
-preserva a proveniência de cada run. Antes de comparar, valida os cinco CSVs,
+preserva a proveniência de cada run. Sem `OBS_REMOTE_PORT` ou `OBS_REMOTE_KEY`,
+o alvo deixa `ssh`/`scp` resolverem porta e identidade pelo alias em
+`~/.ssh/config`; valores explícitos apenas sobrescrevem esse alias. Antes de comparar, valida os cinco CSVs,
 `dataset-manifest.json`, o `manifest.json` final e seus hashes. Run completa
 com artefato ausente, malformado ou alterado fica somente no inventário.
 

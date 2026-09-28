@@ -123,8 +123,8 @@ SWEEP_MODE ?= $(BENCH_MODE)
 SWEEP_CONVERSATION_TURNS ?= $(CONVERSATION_TURNS)
 SWEEP_CONVERSATION_FIXTURE ?= $(CONVERSATION_FIXTURE)
 POD_SSH ?=
-POD_PORT ?= 22
-POD_SSH_KEY ?= $(HOME)/.ssh/id_ed25519
+POD_PORT ?=
+POD_SSH_KEY ?=
 REMOTE_BENCH_DIR ?= /workspace/finance-agent-platform/services/inference-runtime
 REMOTE_RESULTS_DIR ?= $(REMOTE_BENCH_DIR)/results
 LOCAL_RESULTS_DIR ?= results-from-pod
@@ -585,9 +585,15 @@ quick-sweep-ollama: kv-sweep-ollama
 pull-results:
 	@test -n "$(POD_SSH)" || { echo 'Informe POD_SSH, por exemplo: POD_SSH=root@pod-host'; exit 1; }
 	ssh_key_args=()
+	ssh_port_args=()
+	scp_port_args=()
 	if test -n "$(POD_SSH_KEY)"; then \
 		test -f "$(POD_SSH_KEY)" || { echo "Chave SSH ausente: $(POD_SSH_KEY). Use POD_SSH_KEY=/caminho/chave"; exit 1; }; \
 		ssh_key_args=(-i "$(POD_SSH_KEY)"); \
+	fi
+	if test -n "$(POD_PORT)"; then \
+		ssh_port_args=(-p "$(POD_PORT)"); \
+		scp_port_args=(-P "$(POD_PORT)"); \
 	fi
 	mkdir -p "$(LOCAL_RESULTS_DIR)"
 	echo "[DOWNLOAD] $(POD_SSH):$(REMOTE_RESULTS_DIR) -> $(LOCAL_RESULTS_DIR)"
@@ -602,7 +608,7 @@ pull-results:
 		sender_pid=''
 		cleanup() { test -z "$$sender_pid" || kill "$$sender_pid" 2>/dev/null || true; rm -rf "$$tmp_dir"; }
 		trap cleanup EXIT INT TERM
-		ssh "$${ssh_key_args[@]}" -p "$(POD_PORT)" "$(POD_SSH)" \
+		ssh "$${ssh_key_args[@]}" "$${ssh_port_args[@]}" "$(POD_SSH)" \
 			"tar -czf '$$archive_path' -C '$$remote_parent' '$$remote_base' && runpodctl send '$$archive_path'" \
 			>"$$log_file" 2>&1 &
 		sender_pid=$$!
@@ -622,7 +628,7 @@ pull-results:
 		wait "$$sender_pid"
 	else
 		command -v scp >/dev/null || { echo 'scp ausente no computador local'; exit 1; }
-		scp "$${ssh_key_args[@]}" -r -P "$(POD_PORT)" "$(POD_SSH):$(REMOTE_RESULTS_DIR)/." "$(LOCAL_RESULTS_DIR)/"
+		scp "$${ssh_key_args[@]}" "$${scp_port_args[@]}" -r "$(POD_SSH):$(REMOTE_RESULTS_DIR)/." "$(LOCAL_RESULTS_DIR)/"
 	fi
 	echo "[DOWNLOAD] concluído; arquivos em $(LOCAL_RESULTS_DIR)"
 

@@ -18,7 +18,8 @@ Em uma imagem Ubuntu/Debian do RunPod:
 
 ```bash
 apt-get update
-apt-get install -y git curl ca-certificates build-essential cmake pkg-config python3 python3-venv python3-pip
+apt-get install -y git make curl ca-certificates build-essential cmake ninja-build pkg-config python3 python3-venv python3-pip
+ninja --version
 nvidia-smi
 git --version
 python3 --version
@@ -27,6 +28,10 @@ cd /workspace
 git clone https://github.com/thiago-ouverney/finance-agent-platform.git
 cd /workspace/finance-agent-platform/services/inference-runtime
 ```
+
+O preflight do vLLM exige o executável `ninja`: o FlashInfer pode compilar
+kernels CUDA no primeiro aquecimento. `make observe-system-install` instala e
+valida as dependências do sistema em imagens Ubuntu/Debian executadas como root.
 
 O repositório é público, portanto HTTPS é o caminho mais simples para clonar no Pod e não exige chave SSH. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `./.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
 
@@ -73,7 +78,8 @@ Para medir uma bateria sequencial e salvar a telemetria sem abrir Jupyter:
 make observe-bench OBS_RUNTIME=vllm \
   OBS_MODEL_SOURCE=hf \
   OBS_MODEL='Qwen/Qwen2.5-7B-Instruct' \
-  OBS_REVISION='<revisao-ou-commit>'
+  OBS_REVISION='<revisao-ou-commit>' \
+  OBS_BENCH_PROFILE=generic
 ```
 
 `observe-bench` prepara o modelo e o runtime antes da janela medida, mantém o
@@ -99,6 +105,15 @@ A carga é configurada por `OBS_BENCH_SCENARIOS`, `OBS_BENCH_REQUESTS`,
 `OBS_BENCH_REPETITIONS`, `OBS_BENCH_WARMUP` e `OBS_BENCH_MODE`. O diretório
 raiz pode ser alterado com `OBS_RESULTS_DIR`.
 
+`OBS_BENCH_PROFILE=generic` é o padrão. Ele não lê BMCs: usa a fixture técnica
+`qwen_chat_bench_v2.json` e executa cenários sintéticos controlados
+`short=256`, `medium=2048` e `long=7680`. Para BMCs reais, selecione
+explicitamente `mopep-single`, `mopep-review-replay` ou
+`mopep-review-closed-loop` e informe `OBS_REQUEST_DATASET`,
+`OBS_WARMUP_REQUEST_DATASET` e `OBS_REQUEST_MANIFEST`. No MOPEP, os buckets
+`short`, `medium` e `heavy` são tercis fixados na calibração; BMCs não são
+cortados para alcançar os tamanhos do perfil genérico.
+
 Na máquina local:
 
 ```bash
@@ -110,13 +125,18 @@ make observability-notebook
 ```
 
 Use `OBS_REMOTE_RESULTS_DIR` e `OBS_LOCAL_RESULTS_DIR` se os diretórios não
-forem os padrões.
+forem os padrões. Porta e chave são resolvidas pelo alias em `~/.ssh/config`;
+`OBS_REMOTE_PORT` e `OBS_REMOTE_KEY` existem apenas para sobrescrevê-las.
 
 O notebook de comparação usa kernel local e arquivos já baixados. Ele não
 precisa de túnel, runtime ou Prometheus ativos. Resultados brutos, pesos e
 segredos permanecem fora do Git.
 
 Passo a passo: [benchmark de performance](../../docs/guias/gerar-benchmark-performance.md).
+
+Para substituir a fixture sintética por BMCs reais, classificá-los em
+`short/medium/heavy` e medir revisão controlada/closed-loop, siga o
+[benchmark MOPEP entre runtimes](../../docs/guias/gerar-benchmark-performance-mopep.md).
 Contrato técnico: [observabilidade com Prometheus](docs/benchmark/observabilidade-prometheus.md).
 
 ## Perfil interativo com Prometheus e notebook

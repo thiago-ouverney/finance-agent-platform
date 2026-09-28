@@ -12,6 +12,7 @@ Explica o que é medido e como interpretar os resultados.
 - [Bench explicado](benchmark/bench-explicado.md)
 - [Metodologia](benchmark/metodologia.md)
 - [Observabilidade headless e interativa com Prometheus](benchmark/observabilidade-prometheus.md)
+- [Contrato do workload MOPEP](benchmark/workload-mopep.md)
 
 ## Make e execução
 

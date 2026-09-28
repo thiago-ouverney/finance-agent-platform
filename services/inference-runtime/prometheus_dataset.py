@@ -167,6 +167,10 @@ def correlate_samples(samples: list[dict], requests: list[dict], run_start: floa
             "block": request.get("block") if request else None,
             "benchmark_phase": request.get("benchmark_phase") if request else None,
             "scenario": request.get("scenario") if request else None,
+            "workload_request_id": request.get("workload_request_id") if request else None,
+            "workload_profile": request.get("workload_profile") if request else None,
+            "bucket": request.get("bucket") if request else None,
+            "turn_index": request.get("turn_index") if request else None,
             "repetition": request.get("repetition") if request else None,
             "observed_phase": observed_phase(request, timestamp) if request else "outside_request",
             "timestamp_s": timestamp,
@@ -192,13 +196,15 @@ def phase_metrics(correlated: list[dict]) -> list[dict]:
         key = (
             row.get("experiment_id"), row.get("request_uid"), row.get("runtime"), row.get("model"),
             row.get("block"), row.get("benchmark_phase"), row.get("scenario"), row.get("repetition"),
+            row.get("workload_request_id"), row.get("workload_profile"), row.get("bucket"), row.get("turn_index"),
             row.get("observed_phase"), row.get("metric"), row.get("unit"), row.get("kind"), row.get("labels_json"),
         )
         groups[key].append(row)
     result = []
     columns = (
         "experiment_id", "request_uid", "runtime", "model", "block", "benchmark_phase",
-        "scenario", "repetition", "observed_phase", "metric", "unit", "kind", "labels_json",
+        "scenario", "repetition", "workload_request_id", "workload_profile", "bucket", "turn_index",
+        "observed_phase", "metric", "unit", "kind", "labels_json",
     )
     for key, rows in sorted(groups.items(), key=lambda item: tuple(str(value) for value in item[0])):
         rows.sort(key=lambda row: row["timestamp_s"])
@@ -322,6 +328,7 @@ def export_dataset(*, output: str | Path, manifest: dict, requests: list[dict],
     request_fields = [
         "experiment_id", "request_uid", "runtime", "model", "block", "benchmark_phase",
         "scenario", "repetition", "request_index", "status", "error", "mode",
+        "workload_request_id", "workload_profile", "bucket", "rendered_prompt_tokens",
         "conversation_index", "turn_index", "request_sha256", "prompt_tokens", "completion_tokens",
         "total_tokens", "request_start_epoch_s", "first_content_epoch_s", "last_content_epoch_s",
         "request_end_epoch_s", "time_to_first_token_seconds", "time_to_first_token_ms",
@@ -342,6 +349,28 @@ def export_dataset(*, output: str | Path, manifest: dict, requests: list[dict],
             "sha256": _hash(path),
             "bytes": path.stat().st_size,
         })
+    response_metadata = manifest.get("responses")
+    if isinstance(response_metadata, dict) and isinstance(response_metadata.get("path"), str):
+        response_path = output / response_metadata["path"]
+        if not response_path.is_file():
+            raise RuntimeError("Manifesto declara responses.jsonl ausente no pacote.")
+        inventory.append({
+            "name": "responses",
+            "path": str(response_path.relative_to(output)),
+            "sha256": _hash(response_path),
+            "bytes": response_path.stat().st_size,
+        })
+        response_manifest_raw = response_metadata.get("manifest_path")
+        if isinstance(response_manifest_raw, str):
+            response_manifest_path = output / response_manifest_raw
+            if not response_manifest_path.is_file():
+                raise RuntimeError("Manifesto de responses.jsonl ausente no pacote.")
+            inventory.append({
+                "name": "responses_manifest",
+                "path": str(response_manifest_path.relative_to(output)),
+                "sha256": _hash(response_manifest_path),
+                "bytes": response_manifest_path.stat().st_size,
+            })
     dataset_manifest = {
         "schema_version": SCHEMA_VERSION,
         "experiment_id": manifest.get("experiment_id"),
@@ -354,6 +383,7 @@ def export_dataset(*, output: str | Path, manifest: dict, requests: list[dict],
         "runtime_process": manifest.get("runtime_process"),
         "cache_policy_details": manifest.get("cache_policy_details"),
         "benchmark": {
+            "benchmark_profile": manifest.get("benchmark_profile"),
             "smoke": manifest.get("smoke"),
             "requests": manifest.get("requests"),
             "repetitions": manifest.get("repetitions"),
@@ -367,6 +397,8 @@ def export_dataset(*, output: str | Path, manifest: dict, requests: list[dict],
             "profile": manifest.get("profile"),
             "generation_parameters": manifest.get("generation_parameters"),
             "workload": manifest.get("workload"),
+            "request_dataset": manifest.get("request_dataset"),
+            "responses": manifest.get("responses"),
             "conversation_fixture": manifest.get("conversation_fixture"),
             "warmup_conversation_fixture": manifest.get("warmup_conversation_fixture"),
         },

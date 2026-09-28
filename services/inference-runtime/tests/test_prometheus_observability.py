@@ -236,6 +236,11 @@ class ObservabilityMakeTests(unittest.TestCase):
         self.assertIn('--requests "2"', output)
         self.assertIn("--disable-native-monitor", output)
 
+    def test_vllm_install_fails_early_when_ninja_is_missing(self):
+        output = self.make_dry_run("observe-install-vllm")
+        self.assertIn("command -v ninja", output)
+        self.assertIn("apt-get install -y ninja-build", output)
+
     def test_ollama_headless_run_pins_version_and_cache_environment(self):
         output = self.make_dry_run(
             "observe-bench", "OBS_RUNTIME=ollama", "OBS_MODEL_SOURCE=local-gguf",

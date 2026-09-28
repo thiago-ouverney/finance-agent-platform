@@ -116,6 +116,38 @@ class MakefileRegressionTests(unittest.TestCase):
             )
             self.assertEqual(sweep_calls[0][sweep_calls[0].index("--max-context") + 1], "4096")
 
+    def test_pull_observe_results_uses_ssh_config_by_default(self):
+        self.require_oneshell()
+        result = subprocess.run(
+            ["make", "-n", "pull-observe-results", "OBS_REMOTE_HOST=runpod-qwen"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ssh_port_args=()", result.stdout)
+        self.assertIn("scp_port_args=()", result.stdout)
+        self.assertNotIn('-p "22"', result.stdout)
+        self.assertNotIn('-P "22"', result.stdout)
+
+    def test_pull_observe_results_allows_explicit_port_and_key(self):
+        self.require_oneshell()
+        result = subprocess.run(
+            [
+                "make", "-n", "pull-observe-results",
+                "OBS_REMOTE_HOST=runpod-qwen",
+                "OBS_REMOTE_PORT=22022",
+                "OBS_REMOTE_KEY=/tmp/runpod-test-key",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('ssh_port_args=(-p "22022")', result.stdout)
+        self.assertIn('scp_port_args=(-P "22022")', result.stdout)
+        self.assertIn('ssh_key_args=(-i "/tmp/runpod-test-key")', result.stdout)
+
 
 class _ProfilingWrapperMixin:
     def run_wrapper(self, wrapper, profiler):

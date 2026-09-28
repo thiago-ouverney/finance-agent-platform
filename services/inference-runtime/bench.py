@@ -1090,6 +1090,7 @@ def write_requests_csv(path, report):
     """Amostras individuais para análise no R/Python, incluindo status de erro."""
     from reporting import derived
     fields = ["status", "error", "mode", "request_id", "conversation_index", "turn_index",
+              "workload_request_id", "workload_profile", "bucket", "rendered_prompt_tokens",
               "fixture_name", "fixture_sha256", "workload_seed",
               "history_tokens", "history_tokens_estimate", "target_history_tokens", "messages_count",
               "fixture_history_tokens_estimate", "target_delta_tokens_estimate",
@@ -1171,6 +1172,7 @@ def write_summary(output, rows):
 def run(args):
     import fcntl
     from lifecycle import DEFAULT_PROMPT, Launch, lifecycle_report, timed_request, wait_models
+    import workload_dataset as dataset_workload
     if args.prometheus_url:
         from prometheus_dataset import prometheus_ready
         if not prometheus_ready(args.prometheus_url):
@@ -1178,7 +1180,9 @@ def run(args):
     if importlib.metadata.version("guidellm") != GUIDELLM_VERSION:
         raise ValueError(f"Este projeto exige guidellm=={GUIDELLM_VERSION}; reinstale requirements.txt.")
     cfg = load_config(args.config)
-    validate_run(cfg, args.scenarios, args.smoke)
+    mopep_profile = args.benchmark_profile != "generic"
+    if not mopep_profile:
+        validate_run(cfg, args.scenarios, args.smoke)
     availability = local_model_check(args.local_model_path)
     availability["kv_bytes_per_token"] = args.kv_bytes_per_token
     availability["launch_hf_offline"] = bool(args.launch)
@@ -1194,13 +1198,49 @@ def run(args):
     prompt = Path(args.first_prompt_file).read_text(encoding="utf-8") if args.first_prompt_file else DEFAULT_PROMPT
     if not prompt.strip():
         raise ValueError("O prompt inicial não pode estar vazio.")
-    conversation_mode = args.mode in {"closed-loop", "replay"}
+    conversation_mode = not mopep_profile and args.mode in {"closed-loop", "replay"}
     if not conversation_mode and args.conversation_turns != 1:
         raise ValueError("--conversation-turns só pode ser maior que 1 com --mode closed-loop ou --mode replay.")
     conversation_fixture = load_conversation_fixture(args.conversation_fixture) if conversation_mode else None
     warmup_conversation_fixture = load_conversation_fixture(args.warmup_conversation_fixture) if conversation_mode else None
     if conversation_fixture:
         validate_conversation_fixture_for_mode(conversation_fixture, args.mode, args.conversation_turns)
+    dataset_records = warmup_records = []
+    dataset_manifest = None
+    replay_responses, replay_sha256, replay_manifest = None, None, None
+    if mopep_profile:
+        if not args.request_dataset or not args.request_manifest or not args.warmup_request_dataset:
+            raise ValueError("Perfis MOPEP exigem --request-dataset, --request-manifest e --warmup-request-dataset.")
+        dataset_records, dataset_manifest = dataset_workload.load_workload(
+            args.request_dataset, args.request_manifest
+        )
+        warmup_records = dataset_workload.load_jsonl(args.warmup_request_dataset)
+        actual_warmup_sha = dataset_workload.sha256_file(args.warmup_request_dataset)
+        if actual_warmup_sha != dataset_manifest.get("warmup_sha256"):
+            raise ValueError("SHA-256 do workload de warm-up diverge do manifesto.")
+        if args.smoke:
+            dataset_records = dataset_records[:3]
+            warmup_records = warmup_records[:1]
+        largest_prompt = max(
+            row.get("rendered_prompt_tokens") or 0
+            for row in [*dataset_records, *warmup_records]
+        )
+        if largest_prompt + OUTPUT_TOKENS > cfg["context_window"]:
+            raise ValueError(
+                f"Workload MOPEP exige ao menos {largest_prompt + OUTPUT_TOKENS} tokens de contexto; "
+                f"configuração declara {cfg['context_window']}."
+            )
+        count = len(dataset_records)
+        if args.benchmark_profile == "mopep-review-replay":
+            if not args.replay_responses:
+                raise ValueError("mopep-review-replay exige --replay-responses.")
+            replay_responses, replay_sha256, replay_manifest = dataset_workload.load_replay(args.replay_responses)
+            replay_model_sha = replay_manifest.get("model_sha256")
+            current_model_sha = (model_identity or {}).get("sha256")
+            if replay_model_sha and current_model_sha and replay_model_sha != current_model_sha:
+                raise ValueError("O replay canônico foi gerado com outro artefato de modelo.")
+            if replay_manifest.get("workload_sha256") != dataset_manifest.get("workload_sha256"):
+                raise ValueError("O replay canônico pertence a outro workload.")
     base = Path(args.results)
     base.mkdir(parents=True, exist_ok=True)
     with (base / ".benchmark.lock").open("a") as lock:
@@ -1217,20 +1257,35 @@ def run(args):
         run_start_epoch_s = time.time()
         hardware = hardware_snapshot()
         effective_runtime_environment = runtime_environment(cfg)
-        workload = workload_contract(args.scenarios, args.mode)
+        workload = workload_contract(args.scenarios, args.mode) if not mopep_profile else {
+            "kind": "mopep-private-jsonl",
+            "profile": args.benchmark_profile,
+            "dataset_sha256": dataset_manifest["dataset_sha256"],
+            "workload_sha256": dataset_manifest["workload_sha256"],
+            "warmup_sha256": dataset_manifest["warmup_sha256"],
+            "request_order_sha256": dataset_manifest["request_order_sha256"],
+            "prompt_sha256": dataset_manifest["prompt_sha256"],
+            "review_prompt_sha256": dataset_manifest["review_prompt_sha256"],
+            "bucket_thresholds": dataset_manifest["bucket_thresholds"],
+            "replay_responses_sha256": replay_sha256,
+            "closed_loop_inputs_diverge_after_turn_one": args.benchmark_profile == "mopep-review-closed-loop",
+            "prompt_policy": "independent MOPEP BMC requests grouped by frozen calibration terciles",
+        }
+        effective_scenarios = ["short", "medium", "heavy"] if mopep_profile else args.scenarios
         manifest = {"project_version": VERSION, "guidellm_version": GUIDELLM_VERSION, "started_utc": stamp,
                     "experiment_id": experiment_id,
                     "results_layout": "runtime/timestamp/human-name/{html,json,csv,logs,text}",
                     "result_name": label, "runtime_directory": slug(cfg["runtime"]),
                     "config": cfg, "tokenizer": digest, "smoke": args.smoke, "requests": count,
                     "repetitions": repetitions, "warmup_requests_per_case": args.warmup,
-                    "scenarios": args.scenarios, "input_tokens": args.input_tokens,
+                    "scenarios": effective_scenarios, "input_tokens": args.input_tokens,
                     "output_tokens": OUTPUT_TOKENS, "seed": args.seed, "profile": "synchronous",
                     "generation_parameters": {
                         "temperature": 0, "top_p": 1,
                         "max_output_tokens": OUTPUT_TOKENS, "stream": True,
                     },
-                    "mode": args.mode, "conversation_turns": args.conversation_turns,
+                    "mode": args.mode, "benchmark_profile": args.benchmark_profile,
+                    "conversation_turns": args.conversation_turns,
                     "workload": workload,
                     "prompt_policy": workload["prompt_policy"],
                     "conversation_fixture": {"path": conversation_fixture["path"], "sha256": conversation_fixture["sha256"],
@@ -1240,7 +1295,11 @@ def run(args):
                                                      "sha256": warmup_conversation_fixture["sha256"],
                                                      "name": warmup_conversation_fixture["data"].get("name"),
                                                      "version": warmup_conversation_fixture["data"].get("version")} if warmup_conversation_fixture else None,
-                    "conversation_first_request": "first-request.json is a separate single-turn lifecycle probe; closed-loop/replay measured histories start empty per conversation and per block",
+                    "request_dataset": ({
+                        "manifest_sha256": dataset_workload.sha256_file(args.request_manifest),
+                        **dataset_manifest,
+                    } if mopep_profile else None),
+                    "conversation_first_request": "first-request.json is a separate lifecycle probe and never enters formal MOPEP or conversational distributions",
                     "blocks": [],
                     "model_availability": availability,
                     "model_identity": model_identity,
@@ -1271,6 +1330,7 @@ def run(args):
                           collect_resources=not args.disable_native_monitor)
         rows = []
         observability_requests = []
+        mopep_response_rows = []
         launch, origin, cleanup_error, dataset_error = None, None, None, None
         lifecycle = {"mode": "new-process" if args.launch else "existing-server-state-unknown",
                      "status": "running", "initial_state_note": args.initial_state,
@@ -1302,78 +1362,133 @@ def run(args):
                 lifecycle["first_request"], experiment_id=experiment_id, runtime=cfg["runtime"],
                 model=cfg["model"], phase="first_request"))
             lifecycle_report(output, redact(lifecycle, secret))
-            for rep in range(repetitions):
-                # Rotação balanceia parcialmente a posição dos cenários entre repetições.
-                names = args.scenarios[rep % len(args.scenarios):] + args.scenarios[:rep % len(args.scenarios)]
-                for name in names:
-                    for phase, n in (("warmup", args.warmup), ("measure", count)):
-                        if not n:
-                            continue
-                        seed = args.seed + rep * 100 + list(WORKLOADS).index(name)
-                        if phase == "warmup":
-                            seed += 1_000_000
-                        prefix = f"r{rep+1}-{name}-{phase}"
-                        monitor.set_phase(prefix)
-                        config = scenario_config(cfg, name, n, seed, secret, args.timeout)
-                        config["mode"] = args.mode
-                        active_fixture = warmup_conversation_fixture if phase == "warmup" else conversation_fixture
-                        block_workload = workload_contract([name], args.mode)
-                        config["workload"] = block_workload
-                        config["prompt_policy"] = block_workload["prompt_policy"]
-                        if conversation_mode:
-                            config["conversation_turns"] = args.conversation_turns
-                            config["conversation_fixture_sha256"] = active_fixture["sha256"]
-                            if args.mode == "replay" and name in NAMED_WORKLOADS:
-                                config["spec_note"] = (
-                                    "Warmup e medição usam fixtures separadas. O histórico fixo mais próximo "
-                                    "do alvo é selecionado, pares antigos podem ser removidos e contexto "
-                                    "sintético determinístico completa o prompt sem exceder o alvo. "
-                                    "usage.prompt_tokens do runtime é a medida real."
-                                )
+            if mopep_profile:
+                def execute_mopep_block(records, phase, scenario, rep):
+                    prefix = f"r{rep}-{scenario}-{phase}"
+                    monitor.set_phase(prefix)
+                    report = dataset_workload.run_batch(
+                        cfg=cfg, records=records, profile=args.benchmark_profile,
+                        timeout=args.timeout, secret=secret, request=stream_messages_request,
+                        replay=replay_responses,
+                    )
+                    raw = redact(report, secret)
+                    block_responses = dataset_workload.response_rows(raw)
+                    for response in block_responses:
+                        response.update({
+                            "experiment_id": experiment_id,
+                            "runtime": cfg["runtime"],
+                            "model": cfg["model"],
+                            "benchmark_phase": phase,
+                            "repetition": rep,
+                        })
+                    mopep_response_rows.extend(block_responses)
+                    observability_requests.extend(observability_request_rows(
+                        raw, experiment_id=experiment_id, runtime=cfg["runtime"], model=cfg["model"],
+                        block=prefix, benchmark_phase=phase, scenario=scenario, repetition=rep,
+                    ))
+                    write_json(artifact(output, f"{prefix}.json"), raw)
+                    write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
+                    summary = summarize(raw)
+                    expected = len(records) * (2 if args.benchmark_profile == "mopep-review-closed-loop" else 1)
+                    summary["expected"] = expected
+                    summary["missing_request_count"] = max(0, expected - sum(
+                        summary[key] for key in ("successful_request_count", "errored_request_count", "incomplete_request_count")
+                    ))
+                    manifest["blocks"].append({
+                        "prefix": prefix, "mode": args.benchmark_profile, "phase": phase,
+                        "scenario": scenario, "repetition": rep, "expected_requests": expected,
+                        "requests_sha256": summary["requests_sha256"],
+                    })
+                    rows.append({
+                        "runtime": cfg["runtime"], "model": cfg["model"],
+                        "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
+                        "mode": args.benchmark_profile, "phase": phase, "scenario": scenario,
+                        "repetition": rep, **summary,
+                    })
+                    write_json(artifact(output, "manifest.json"), redact(manifest, secret))
+                    write_summary(output, rows)
+                    if summary["successful_request_count"] != expected or summary["errored_request_count"] or summary["incomplete_request_count"]:
+                        raise RuntimeError(f"{prefix}: requisições MOPEP falharam ou execução incompleta.")
+
+                for rep in range(1, repetitions + 1):
+                    execute_mopep_block(warmup_records, "warmup", "warmup", rep)
+                    for bucket in ("short", "medium", "heavy"):
+                        selected = [row for row in dataset_records if row["bucket"] == bucket]
+                        if selected:
+                            execute_mopep_block(selected, "measure", bucket, rep)
+            else:
+                for rep in range(repetitions):
+                    # Rotação balanceia parcialmente a posição dos cenários entre repetições.
+                    names = args.scenarios[rep % len(args.scenarios):] + args.scenarios[:rep % len(args.scenarios)]
+                    for name in names:
+                        for phase, n in (("warmup", args.warmup), ("measure", count)):
+                            if not n:
+                                continue
+                            seed = args.seed + rep * 100 + list(WORKLOADS).index(name)
+                            if phase == "warmup":
+                                seed += 1_000_000
+                            prefix = f"r{rep+1}-{name}-{phase}"
+                            monitor.set_phase(prefix)
+                            config = scenario_config(cfg, name, n, seed, secret, args.timeout)
+                            config["mode"] = args.mode
+                            active_fixture = warmup_conversation_fixture if phase == "warmup" else conversation_fixture
+                            block_workload = workload_contract([name], args.mode)
+                            config["workload"] = block_workload
+                            config["prompt_policy"] = block_workload["prompt_policy"]
+                            if conversation_mode:
+                                config["conversation_turns"] = args.conversation_turns
+                                config["conversation_fixture_sha256"] = active_fixture["sha256"]
+                                if args.mode == "replay" and name in NAMED_WORKLOADS:
+                                    config["spec_note"] = (
+                                        "Warmup e medição usam fixtures separadas. O histórico fixo mais próximo "
+                                        "do alvo é selecionado, pares antigos podem ser removidos e contexto "
+                                        "sintético determinístico completa o prompt sem exceder o alvo. "
+                                        "usage.prompt_tokens do runtime é a medida real."
+                                    )
+                                else:
+                                    config["spec_note"] = (
+                                        "Warmup usa fixture separada; medição usa a fixture versionada. "
+                                        "usage.prompt_tokens do runtime é a medida real quando disponível."
+                                    )
+                            write_json(artifact(output, f"{prefix}-config.json"), redact(config, secret))
+                            expected = n * args.conversation_turns if conversation_mode else n
+                            unit = "conversas" if conversation_mode else "requisições"
+                            print(f"{prefix}: {n} {unit}, uma chamada por vez", flush=True)
+                            if conversation_mode:
+                                report = run_conversational_batch(cfg, measurement_tokenizer, name, n, args.conversation_turns,
+                                                                  args.timeout, secret, active_fixture, args.mode)
                             else:
-                                config["spec_note"] = (
-                                    "Warmup usa fixture separada; medição usa a fixture versionada. "
-                                    "usage.prompt_tokens do runtime é a medida real quando disponível."
-                                )
-                        write_json(artifact(output, f"{prefix}-config.json"), redact(config, secret))
-                        expected = n * args.conversation_turns if conversation_mode else n
-                        unit = "conversas" if conversation_mode else "requisições"
-                        print(f"{prefix}: {n} {unit}, uma chamada por vez", flush=True)
-                        if conversation_mode:
-                            report = run_conversational_batch(cfg, measurement_tokenizer, name, n, args.conversation_turns,
-                                                              args.timeout, secret, active_fixture, args.mode)
-                        else:
-                            report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret, seed)
-                        raw = redact(report, secret)
-                        observability_requests.extend(observability_request_rows(
-                            raw, experiment_id=experiment_id, runtime=cfg["runtime"], model=cfg["model"],
-                            block=prefix, benchmark_phase=phase, scenario=name, repetition=rep + 1))
-                        write_json(artifact(output, f"{prefix}.json"), raw)
-                        turns = turn_manifest(raw) if conversation_mode else []
-                        conversation_file = None
-                        if conversation_mode:
-                            write_json(artifact(output, f"{prefix}-turns.json"), turns)
-                            conversation_file = f"{prefix}-conversation.json"
-                            write_json(artifact(output, conversation_file), conversation_artifact(raw, conversation_fixture))
-                        write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
-                        summary = summarize(raw)
-                        summary["expected"] = expected
-                        summary["missing_request_count"] = max(0, expected - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
-                        manifest["blocks"].append({"prefix": prefix, "mode": args.mode, "phase": phase,
-                                                   "scenario": name, "repetition": rep+1, "seed": seed,
-                                                   "conversations": n if conversation_mode else None,
-                                                   "conversation_turns": args.conversation_turns if conversation_mode else None,
-                                                   "expected_requests": expected,
-                                                   "requests_sha256": summary["requests_sha256"],
-                                                   "conversation_artifact": conversation_file,
-                                                   "turns": turns if conversation_mode else None})
-                        write_json(artifact(output, "manifest.json"), redact(manifest, secret))
-                        rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
-                                     "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
-                                     "mode": args.mode, "phase": phase, "scenario": name, "repetition": rep+1, **summary})
-                        write_summary(output, rows)
-                        if summary["successful_request_count"] != expected or summary["errored_request_count"] or summary["incomplete_request_count"]:
-                            raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
+                                report = run_stream_batch(cfg, measurement_tokenizer, name, n, args.timeout, secret, seed)
+                            raw = redact(report, secret)
+                            observability_requests.extend(observability_request_rows(
+                                raw, experiment_id=experiment_id, runtime=cfg["runtime"], model=cfg["model"],
+                                block=prefix, benchmark_phase=phase, scenario=name, repetition=rep + 1))
+                            write_json(artifact(output, f"{prefix}.json"), raw)
+                            turns = turn_manifest(raw) if conversation_mode else []
+                            conversation_file = None
+                            if conversation_mode:
+                                write_json(artifact(output, f"{prefix}-turns.json"), turns)
+                                conversation_file = f"{prefix}-conversation.json"
+                                write_json(artifact(output, conversation_file), conversation_artifact(raw, conversation_fixture))
+                            write_requests_csv(artifact(output, f"{prefix}-requests.csv"), raw)
+                            summary = summarize(raw)
+                            summary["expected"] = expected
+                            summary["missing_request_count"] = max(0, expected - sum(summary[k] for k in ("successful_request_count", "errored_request_count", "incomplete_request_count")))
+                            manifest["blocks"].append({"prefix": prefix, "mode": args.mode, "phase": phase,
+                                                       "scenario": name, "repetition": rep+1, "seed": seed,
+                                                       "conversations": n if conversation_mode else None,
+                                                       "conversation_turns": args.conversation_turns if conversation_mode else None,
+                                                       "expected_requests": expected,
+                                                       "requests_sha256": summary["requests_sha256"],
+                                                       "conversation_artifact": conversation_file,
+                                                       "turns": turns if conversation_mode else None})
+                            write_json(artifact(output, "manifest.json"), redact(manifest, secret))
+                            rows.append({"runtime": cfg["runtime"], "model": cfg["model"],
+                                         "cache_policy": cfg["cache_policy"], "tokenizer_sha256": digest["sha256"],
+                                         "mode": args.mode, "phase": phase, "scenario": name, "repetition": rep+1, **summary})
+                            write_summary(output, rows)
+                            if summary["successful_request_count"] != expected or summary["errored_request_count"] or summary["incomplete_request_count"]:
+                                raise RuntimeError(f"{prefix}: requisições falharam ou execução incompleta. Veja o JSON; não compare como sucesso.")
             monitor.set_phase("warm_reference")
             lifecycle["warm_reference"] = timed_request(cfg, secret, args.timeout, prompt,
                                                          artifact(output, "warm-reference.json"))
@@ -1397,6 +1512,34 @@ def run(args):
                             lifecycle[key], experiment_id=experiment_id, runtime=cfg["runtime"],
                             model=cfg["model"], phase=key))
             observability_requests = [row for row in observability_requests if row is not None]
+            if mopep_profile and mopep_response_rows:
+                responses_path = artifact(output, "responses.jsonl")
+                dataset_workload.write_responses(responses_path, mopep_response_rows)
+                response_manifest = {
+                    "schema_version": 1,
+                    "source_runtime": cfg["runtime"],
+                    "source_runtime_version": cfg.get("runtime_version"),
+                    "model": cfg["model"],
+                    "model_sha256": (model_identity or {}).get("sha256"),
+                    "workload_sha256": dataset_manifest["workload_sha256"],
+                    "prompt_sha256": dataset_manifest["prompt_sha256"],
+                    "benchmark_profile": args.benchmark_profile,
+                    "responses_sha256": dataset_workload.sha256_file(responses_path),
+                    "row_count": len(mopep_response_rows),
+                }
+                response_manifest_path = artifact(output, "responses-manifest.json")
+                write_json(response_manifest_path, response_manifest)
+                manifest["responses"] = {
+                    "path": str(responses_path.relative_to(output)),
+                    "manifest_path": str(response_manifest_path.relative_to(output)),
+                    "sha256": response_manifest["responses_sha256"],
+                    "row_count": len(mopep_response_rows),
+                }
+                if args.responses_out:
+                    external = Path(args.responses_out)
+                    external.parent.mkdir(parents=True, exist_ok=True)
+                    dataset_workload.write_responses(external, mopep_response_rows)
+                    write_json(dataset_workload.replay_manifest_path(external), response_manifest)
             if args.prometheus_url:
                 monitor.set_phase("prometheus_export")
                 try:
@@ -1515,6 +1658,12 @@ def main():
                      help="Fixture JSON versionado com system e lista fixa de user turns; replay tambem exige assistant nos turnos anteriores.")
     cmd.add_argument("--warmup-conversation-fixture", default=str(DEFAULT_WARMUP_CONVERSATION_FIXTURE),
                      help="Fixture separada para warmup; nunca é usada na medição formal.")
+    cmd.add_argument("--benchmark-profile", choices=["generic", "mopep-single", "mopep-review-replay", "mopep-review-closed-loop"], default="generic")
+    cmd.add_argument("--request-dataset", help="workload.jsonl privado para perfis MOPEP.")
+    cmd.add_argument("--warmup-request-dataset", help="warmup.jsonl privado e separado para perfis MOPEP.")
+    cmd.add_argument("--request-manifest", help="workload-manifest.json com hashes e tercis congelados.")
+    cmd.add_argument("--replay-responses", help="responses.jsonl canônico exigido por mopep-review-replay.")
+    cmd.add_argument("--responses-out", help="Cópia explícita das respostas para alimentar replay ou análise privada.")
     cmd.add_argument("--seed", type=positive, default=42)
     cmd.add_argument("--timeout", type=positive, default=300)
     cmd.add_argument("--results", default="results")
