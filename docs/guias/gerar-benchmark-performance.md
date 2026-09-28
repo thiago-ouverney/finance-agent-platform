@@ -18,14 +18,20 @@ No Pod:
 
 ```bash
 apt-get update
-apt-get install -y git make curl ca-certificates build-essential cmake pkg-config \
-  python3 python3-venv
+apt-get install -y git make curl ca-certificates build-essential cmake ninja-build \
+  pkg-config python3 python3-venv python3-pip
+ninja --version
 nvidia-smi
 cd /workspace
 git clone https://github.com/thiago-ouverney/finance-agent-platform.git
 cd finance-agent-platform/services/inference-runtime
 make observe-help
 ```
+
+O `ninja-build` é necessário porque vLLM/FlashInfer pode compilar kernels CUDA
+durante o primeiro aquecimento. Sem ele, o servidor encerra antes de abrir a
+porta e o benchmark reporta `Connection refused`; o erro raiz no
+`logs/server.log` será `No such file or directory: 'ninja'`.
 
 Para llama.cpp com CUDA, use uma imagem *devel* e valide também
 `nvcc --version`.
@@ -112,13 +118,34 @@ make observe-config \
 
 ## 3. Execute a rodada
 
+### 3.1 Escolha o perfil da carga
+
+`OBS_BENCH_PROFILE` define **de onde vêm as requisições**. Se a variável não
+for informada, o valor padrão é `generic`; portanto, `observe-bench` não usa
+BMCs nem o dataset MOPEP implicitamente.
+
+| Perfil | Entrada | Grupos de tamanho |
+|---|---|---|
+| `generic` (padrão) | conversas técnicas versionadas em `qwen_chat_bench_v2.json` | `short=256`, `medium=2048`, `long=7680` tokens-alvo |
+| `mopep-single` | BMCs reais de `workload.jsonl`, uma chamada por BMC | `short`, `medium`, `heavy`, definidos pelos tercis da calibração |
+| `mopep-review-replay` | revisão sobre a mesma resposta canônica | buckets MOPEP preservados |
+| `mopep-review-closed-loop` | classificação real seguida de revisão da resposta produzida | buckets MOPEP preservados |
+
+Perfil e cenário são conceitos diferentes: `generic` é o perfil; `short`,
+`medium` e `long` são os cenários executados dentro dele. Para usar MOPEP é
+obrigatório definir `OBS_BENCH_PROFILE` e informar dataset, warm-up e
+manifesto. Consulte o [guia MOPEP](gerar-benchmark-performance-mopep.md).
+
+### 3.2 Execute o perfil genérico
+
 Uma execução completa precisa de apenas um comando:
 
 ```bash
 make observe-bench \
   OBS_RUNTIME=vllm \
   OBS_MODEL_SOURCE=hf \
-  OBS_MODEL='Qwen/Qwen2.5-7B-Instruct'
+  OBS_MODEL='Qwen/Qwen2.5-7B-Instruct' \
+  OBS_BENCH_PROFILE=generic
 ```
 
 Não inicie Jupyter, outro runtime ou outra carga na mesma GPU. O Prometheus
@@ -134,6 +161,7 @@ make observe-bench \
   OBS_RUNTIME=vllm \
   OBS_MODEL_SOURCE=hf \
   OBS_MODEL='Qwen/Qwen2.5-7B-Instruct' \
+  OBS_BENCH_PROFILE=generic \
   OBS_BENCH_SCENARIOS='short medium long' \
   OBS_BENCH_REQUESTS=20 \
   OBS_BENCH_REPETITIONS=1 \
@@ -141,8 +169,9 @@ make observe-bench \
   OBS_BENCH_MODE=replay
 ```
 
-Os nomes têm alvos fixos: `short=256`, `medium=2048` e `long=7680` tokens de
-entrada. Em `replay`, o cliente escolhe o histórico versionado mais próximo,
+No perfil `generic`, os nomes têm alvos fixos: `short=256`, `medium=2048` e
+`long=7680` tokens de entrada. Esses tamanhos não foram derivados de BMCs. Em
+`replay`, o cliente escolhe o histórico versionado mais próximo,
 remove pares antigos se necessário e completa abaixo do alvo com contexto
 sintético determinístico. O CSV preserva a estimativa e também
 `prompt_tokens` retornado pelo runtime; este último é a medida real. O alvo
@@ -200,7 +229,9 @@ make pull-observe-results OBS_REMOTE_HOST=runpod-qwen
 
 O alvo copia os pacotes sem apagar os resultados remotos ou locais. Host,
 usuário, porta e chave devem permanecer em `~/.ssh/config` ou apenas na linha
-de comando. Se os diretórios não forem os padrões, use
+de comando. Quando `OBS_REMOTE_PORT` e `OBS_REMOTE_KEY` forem omitidos, `ssh` e
+`scp` usam integralmente o alias, inclusive porta e identidade. Informe essas
+variáveis somente para sobrescrever o alias. Se os diretórios não forem os padrões, use
 `OBS_REMOTE_RESULTS_DIR` e `OBS_LOCAL_RESULTS_DIR`.
 Antes de aceitar o pacote, o alvo valida `SHA256SUMS`, incluindo o manifesto
 final que define se a execução terminou como `complete`.
@@ -235,6 +266,10 @@ O fluxo legado `make bench-all` continua sendo a bateria formal completa dos
 três runtimes e o `make observe-bench` é a variante headless que agrega a série
 Prometheus ao pacote. Para uma inspeção manual de uma ou poucas requisições,
 use o [perfil interativo](perfilar-inferencia-prometheus.md).
+
+Este guia usa a carga conversacional genérica. Para BMCs reais, buckets
+`short/medium/heavy` e revisão por heurísticas, use o
+[benchmark de performance MOPEP](gerar-benchmark-performance-mopep.md).
 
 Contrato técnico: [observabilidade com
 Prometheus](../../services/inference-runtime/docs/benchmark/observabilidade-prometheus.md).

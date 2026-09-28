@@ -22,6 +22,9 @@ repetir os tutoriais de cada componente.
 - **GERAR O BENCHMARK DE PERFORMANCE** — executa uma carga sequencial no Pod,
   coleta Prometheus e compara vLLM, llama.cpp e Ollama localmente.
   [Executar o guia](guias/gerar-benchmark-performance.md).
+- **COMPARAR RUNTIMES COM BMCS MOPEP** — separa BMCs reais por tamanho, mede
+  classificação e revisão e une qualidade com Prometheus.
+  [Executar o guia](guias/gerar-benchmark-performance-mopep.md).
 - **PERFILAR UMA INFERÊNCIA NO POD** — correlaciona prefill/TTFT e decode com
   CPU, GPU, memória, disco e KV cache em um notebook.
   [Executar o guia](guias/perfilar-inferencia-prometheus.md).
@@ -49,6 +52,8 @@ BMC + tags MOPEP
 
 O alias oficial da UFF é `uff-delta`; para Pods, use `runpod-qwen`. Hosts,
 usuários, portas e chaves ficam somente em `~/.ssh/config`.
+Os alvos de download respeitam esse alias por padrão; porta e chave só são
+passadas à ferramenta SSH quando houver uma sobrescrita explícita.
 
 As pontes mantêm os serviços remotos privados:
 
@@ -294,6 +299,13 @@ um cenário secundário porque mudam o histórico de cada runtime.
 Uma melhora pode vir de pesos carregados, compilação ou cache de prefixo, não
 necessariamente do KV-cache. O sweep mede capacidade e memória; o refinamento
 mede a experiência multi-turno.
+
+### 3.5 Workload real MOPEP
+
+O perfil MOPEP usa BMCs independentes agrupados por tercis de tokens da
+calibração e mede classificação, revisão controlada e closed-loop. O runtime
+recebe BMC e heurísticas, nunca as tags esperadas. Para executar e interpretar:
+[benchmark MOPEP entre runtimes](guias/gerar-benchmark-performance-mopep.md).
 
 ## 4. Uso em tempo real
 

@@ -146,6 +146,15 @@ avaliação exploratória isolada
 - **Comando:** `make notebook`.
 - **Não faz:** medir o runtime novamente.
 
+### [`analyze_mopep_runtime_benchmark.ipynb`](../analytics/notebooks/analyze_mopep_runtime_benchmark.ipynb)
+
+- **Responsabilidade:** unir qualidade MOPEP e performance por runtime,
+  bucket, perfil e turno, incluindo melhoria e regressão após revisão.
+- **Entradas:** dataset criado por `make mopep-performance-dataset` a partir
+  do golden local, respostas privadas e consolidado Prometheus.
+- **Comando:** `make mopep-performance-notebook`.
+- **Não faz:** inferência, geração de replay ou recálculo dos tercis.
+
 ## Fluxo EaaS
 
 ### [`build_eaas_business_model_canvas.ipynb`](../analytics/notebooks/build_eaas_business_model_canvas.ipynb)
