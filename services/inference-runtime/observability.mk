@@ -166,7 +166,7 @@ OBS_OLLAMA_ENV = OLLAMA_MODELS="$(OBS_OLLAMA_MODELS)" OLLAMA_KEEP_ALIVE="$(OBS_O
 	observe-serve observe-serve-vllm observe-serve-llama observe-serve-ollama \
 	observe-prometheus-start observe-prometheus-stop observe-status \
 	observe-notebook-install observe-jupyter observe-model-prepare observe-render-runtime \
-	observe-prepare-headless-ollama observe-bench-prepare observe-bench observe-bench-all pull-observe-results
+	observe-prepare-headless-ollama observe-bench-prepare observe-bench-validate observe-bench observe-bench-all pull-observe-results
 
 observe-help:
 	@printf '%s\n' \
@@ -482,7 +482,14 @@ observe-prepare-headless-ollama: observe-render-runtime
 observe-bench-prepare: observe-check-model-source observe-install install-benchmark prometheus-install observe-render-runtime observe-prepare-headless-ollama
 	@echo '[OBSERVE] preparação concluída; pesos, tokenizer, runtimes e coletores estão locais.'
 
-observe-bench: observe-bench-prepare
+observe-bench-validate: observe-bench-prepare
+	@"$(PYTHON)" bench.py validate \
+		--config "$(OBS_GENERATED_CONFIG)" \
+		$(if $(strip $(OBS_BENCH_INPUT_TOKENS)),--input-tokens $(OBS_BENCH_INPUT_TOKENS),--scenarios $(OBS_BENCH_SCENARIOS)) \
+		--benchmark-profile "$(OBS_BENCH_PROFILE)" \
+		$(if $(filter 1,$(OBS_BENCH_SMOKE)),--smoke)
+
+observe-bench: observe-bench-validate
 	@prometheus_started=0
 	if test "$(OBS_RUNTIME)" = vllm; then \
 		$(OBS_VLLM_EXPORT_CUDA_RUNTIME)

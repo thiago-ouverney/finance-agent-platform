@@ -171,6 +171,15 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(bench.NAMED_WORKLOADS,
                          {"short": 256, "medium": 2048, "long": 7680})
 
+    def test_context_guard_reports_observed_context_and_action(self):
+        cfg = bench.load_config(bench.ROOT / "configs/vllm.json")
+        cfg["context_window"] = 2048
+        with self.assertRaisesRegex(
+            ValueError,
+            r"medium exige context_window >= 2432, mas a configuração declara 2048.*OBS_CONTEXT=8192",
+        ):
+            bench.validate_run(cfg, ["medium"], True)
+
     def test_workload_contract_fingerprints_targets_and_prompt_authority(self):
         contract = bench.workload_contract(["short", "medium", "long"], "replay")
         self.assertEqual(contract["named_scenario_defaults"], bench.NAMED_WORKLOADS)

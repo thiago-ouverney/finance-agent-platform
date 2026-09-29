@@ -203,6 +203,24 @@ class MakefileRegressionTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exige OBS_MODEL_SOURCE=gguf ou local-gguf", result.stderr)
 
+    def test_observe_bench_validates_before_starting_prometheus(self):
+        self.require_oneshell()
+        result = subprocess.run(
+            [
+                "make", "-n", "observe-bench",
+                "OBS_RUNTIME=vllm",
+                "OBS_MODEL_SOURCE=local-hf",
+                "OBS_MODEL=/workspace/model",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        validation = result.stdout.index("bench.py validate")
+        prometheus = result.stdout.index("scripts/prometheus_stack.py start")
+        self.assertLess(validation, prometheus)
+
 
 class _ProfilingWrapperMixin:
     def run_wrapper(self, wrapper, profiler):

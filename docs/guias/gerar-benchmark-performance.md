@@ -187,6 +187,25 @@ sequenciais. Concorrência é outro experimento. As portas 9090 e 9108 precisam
 estar livres; o comando recusa serviços preexistentes para não coletar outra
 instância por engano.
 
+Em outro terminal do mesmo Pod, acompanhe uma campanha sem alterar seus
+processos ou arquivos:
+
+```bash
+python3 scripts/observe_campaign_status.py --results results --watch 5 --since-minutes 60
+```
+
+O monitor mostra os seis estágios de `observe-bench-all`, a fase corrente, os
+blocos já persistidos e o próximo estágio. Ajuste a janela para excluir runs
+antigas. Em campanhas MOPEP, acrescente `--profile mopep-single`,
+`--profile mopep-review-replay` ou `--profile mopep-review-closed-loop`.
+
+Antes de iniciar o Prometheus, o fluxo valida o contexto declarado contra os
+cenários selecionados. `short`, `medium` e `long` exigem respectivamente ao
+menos 640, 2432 e 8064 tokens, incluindo saída e margem do template. Para a
+campanha completa, use `OBS_CONTEXT=8192`. Uma variável `OBS_CONTEXT` exportada
+no shell sobrescreve o padrão; a falha informa tanto o valor observado quanto
+o ajuste necessário e não inicia os coletores.
+
 Para configurar a carga, use as variáveis do cliente:
 
 ```bash

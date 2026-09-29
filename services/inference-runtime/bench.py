@@ -715,8 +715,13 @@ def validate_run(cfg, scenarios, smoke):
         # Margem para o template; o servidor continua sendo a autoridade final.
         needed = WORKLOADS[scenario] + OUTPUT_TOKENS + 256
         if cfg["context_window"] < needed:
-            raise ValueError(f"{scenario} precisa de contexto declarado >= {needed}; "
-                             "altere o servidor e depois o JSON, ou retire esse cenário.")
+            raise ValueError(
+                f"{scenario} exige context_window >= {needed}, mas a configuração "
+                f"declara {cfg['context_window']}. No fluxo observe-bench, use "
+                f"OBS_CONTEXT={needed} ou maior; para short/medium/long use "
+                "OBS_CONTEXT=8192. Como alternativa, retire o cenário com "
+                "OBS_BENCH_SCENARIOS."
+            )
     if not smoke:
         if any("PREENCHER" in cfg[k] or "SUBSTITUA" in cfg[k]
                for k in ("model", "runtime_version", "model_artifact", "server_command")):
@@ -1596,6 +1601,21 @@ def positive(value):
     return number
 
 
+def validate_config(args):
+    """Valida a configuração estática antes de iniciar runtime e coletores."""
+    cfg = load_config(args.config)
+    if args.benchmark_profile == "generic":
+        validate_run(cfg, args.scenarios, args.smoke)
+    print(json.dumps({
+        "config": str(Path(args.config).resolve()),
+        "context_window": cfg["context_window"],
+        "benchmark_profile": args.benchmark_profile,
+        "scenarios": args.scenarios,
+        "smoke": args.smoke,
+        "status": "valid",
+    }, ensure_ascii=False, indent=2))
+
+
 def nonnegative(value):
     number = int(value)
     if number < 0:
@@ -1640,6 +1660,23 @@ def main():
     prep.add_argument("--revision", default="main")
     prep.add_argument("--output", default="tokenizer")
     prep.set_defaults(func=prepare_tokenizer)
+    validate = commands.add_parser(
+        "validate",
+        help="Valida config, perfil e contexto sem iniciar runtime ou coletores.",
+    )
+    validate.add_argument("--config", required=True)
+    validate.add_argument("--input-tokens", nargs="+", type=positive)
+    validate.add_argument(
+        "--scenarios", nargs="+", choices=list(WORKLOADS),
+        default=["short", "medium", "long"],
+    )
+    validate.add_argument(
+        "--benchmark-profile",
+        choices=["generic", "mopep-single", "mopep-review-replay", "mopep-review-closed-loop"],
+        default="generic",
+    )
+    validate.add_argument("--smoke", action="store_true")
+    validate.set_defaults(func=validate_config)
     cmd = commands.add_parser("run", help="Mede primeiro acesso, aquecimento e GuideLLM; lançamento do servidor é opcional.")
     cmd.add_argument("--config", required=True)
     cmd.add_argument("--local-model-path", required=True, help="Pesos já no SSD: pasta HF, arquivo GGUF ou blob local do Ollama. Não baixa arquivos.")
