@@ -241,6 +241,20 @@ class ObservabilityMakeTests(unittest.TestCase):
         self.assertIn("command -v ninja", output)
         self.assertIn("apt-get install -y ninja-build", output)
 
+    def test_vllm_uses_bundled_cuda_runtime_for_import_and_launch(self):
+        install = self.make_dry_run("observe-install-vllm")
+        serve = self.make_dry_run("observe-serve-vllm")
+        bench = self.make_dry_run(
+            "observe-bench",
+            "OBS_RUNTIME=vllm",
+            "OBS_MODEL_SOURCE=hf",
+            "OBS_MODEL=Qwen/Qwen2.5-7B-Instruct",
+        )
+        for output in (install, serve, bench):
+            self.assertIn("nvidia/cu13/lib/libcudart.so.13", output)
+            self.assertIn('export VLLM_CUDA_RUNTIME_LIB="$vllm_cuda_runtime_lib"', output)
+            self.assertIn('export LD_LIBRARY_PATH="$vllm_cuda_runtime_lib:', output)
+
     def test_ollama_headless_run_pins_version_and_cache_environment(self):
         output = self.make_dry_run(
             "observe-bench", "OBS_RUNTIME=ollama", "OBS_MODEL_SOURCE=local-gguf",

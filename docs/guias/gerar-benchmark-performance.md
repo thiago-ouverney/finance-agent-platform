@@ -120,6 +120,13 @@ exata. A versão realmente executada, hashes dos binários e o `argv` efetivo fi
 uma instalação existente que divergir da revisão solicitada do llama.cpp ou da
 versão solicitada do Ollama é recusada.
 
+O pacote do vLLM pode trazer `libcudart.so.13` dentro do próprio ambiente
+Python mesmo quando o toolkit usado para compilar llama.cpp é CUDA 12.x. O Make
+detecta `site-packages/nvidia/cu13/lib`, acrescenta-o ao `LD_LIBRARY_PATH` dos
+processos vLLM e registra o diretório em `VLLM_CUDA_RUNTIME_LIB`. Não é
+necessário substituir o toolkit do Pod. Se a distribuição instalar a biblioteca
+em outro local, informe `OBS_VLLM_CUDA_RUNTIME_LIB=/caminho/para/lib`.
+
 No Ollama, a rodada também fixa e registra `KEEP_ALIVE=-1`, KV `f16`, flash
 attention ligada, um modelo carregado e paralelismo 1. Esses valores podem ser
 alterados pelas variáveis `OBS_OLLAMA_*`, mas passam a definir outro experimento.

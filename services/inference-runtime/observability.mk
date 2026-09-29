@@ -56,6 +56,25 @@ OBS_VLLM_DTYPE ?= auto
 OBS_VLLM_GPU_MEMORY_UTILIZATION ?= 0.90
 OBS_VLLM_MAX_NUM_SEQS ?= 1
 OBS_VLLM_EXTRA_ARGS ?=
+OBS_VLLM_CUDA_RUNTIME_LIB ?=
+
+# vLLM 0.29.0 pode instalar um libcudart privado em nvidia/cu13/lib mesmo
+# quando o toolkit do Pod e o PyTorch usam CUDA 12.x. O loader não encontra
+# esse diretório automaticamente, então todos os pontos que importam ou
+# iniciam vLLM devem chamar este bloco no mesmo shell do processo filho.
+define OBS_VLLM_EXPORT_CUDA_RUNTIME
+vllm_site_packages=$$("$(OBS_VLLM_PYTHON)" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')
+vllm_cuda_runtime_lib="$(OBS_VLLM_CUDA_RUNTIME_LIB)"
+if test -n "$$vllm_cuda_runtime_lib"; then \
+	test -d "$$vllm_cuda_runtime_lib" || { echo "OBS_VLLM_CUDA_RUNTIME_LIB inexistente: $$vllm_cuda_runtime_lib" >&2; exit 1; }; \
+elif test -f "$$vllm_site_packages/nvidia/cu13/lib/libcudart.so.13"; then \
+	vllm_cuda_runtime_lib="$$vllm_site_packages/nvidia/cu13/lib"; \
+fi
+if test -n "$$vllm_cuda_runtime_lib"; then \
+	export VLLM_CUDA_RUNTIME_LIB="$$vllm_cuda_runtime_lib"; \
+	export LD_LIBRARY_PATH="$$vllm_cuda_runtime_lib:$${LD_LIBRARY_PATH:-}"; \
+fi
+endef
 
 OBS_GGUF_REPO ?= arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf
 OBS_GGUF_REVISION ?= main
@@ -214,6 +233,7 @@ observe-install-vllm:
 		test -z "$$(git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" status --porcelain --untracked-files=no)" || { echo 'vllm-gguf-plugin possui alterações locais.' >&2; exit 1; }; \
 		"$(OBS_VLLM_PYTHON)" -m pip install --disable-pip-version-check --no-build-isolation "$(OBS_VLLM_GGUF_PLUGIN_DIR)"; \
 	fi
+	$(OBS_VLLM_EXPORT_CUDA_RUNTIME)
 	"$(OBS_VLLM_PYTHON)" -c 'import torch,vllm; assert torch.cuda.is_available(), "PyTorch não detectou CUDA"; print("vLLM", vllm.__version__); print("GPU", torch.cuda.get_device_name(0))'
 
 observe-install-llama:
@@ -283,6 +303,7 @@ observe-serve: observe-check-runtime
 
 observe-serve-vllm:
 	@test -x "$(OBS_VLLM_BIN)" || { echo 'vLLM ausente; execute make observe-prepare OBS_RUNTIME=vllm.' >&2; exit 1; }
+	$(OBS_VLLM_EXPORT_CUDA_RUNTIME)
 	model="$(OBS_VLLM_MODEL)"
 	format_args=()
 	if test "$(OBS_VLLM_FORMAT)" = gguf; then \
@@ -381,6 +402,9 @@ observe-bench-prepare: observe-check-model-source observe-install install-benchm
 
 observe-bench: observe-bench-prepare
 	@prometheus_started=0
+	if test "$(OBS_RUNTIME)" = vllm; then \
+		$(OBS_VLLM_EXPORT_CUDA_RUNTIME)
+	fi
 	cleanup() { \
 		status=$$?; \
 		trap - EXIT INT TERM; \

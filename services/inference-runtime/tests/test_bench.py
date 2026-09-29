@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import socket
 import sys
@@ -128,6 +129,20 @@ class UnitTests(unittest.TestCase):
         self.assertNotIn("must-not-leak", encoded)
         self.assertNotIn("api_key", encoded)
         self.assertNotIn("authorization", encoded)
+
+    def test_vllm_runtime_environment_records_bundled_cuda_runtime(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "VLLM_CUDA_RUNTIME_LIB": "/venv/site-packages/nvidia/cu13/lib",
+                "LD_LIBRARY_PATH": "/must/not/be/persisted",
+            },
+            clear=True,
+        ):
+            environment = bench.runtime_environment({"runtime": "vllm"})
+        self.assertEqual(environment, {
+            "VLLM_CUDA_RUNTIME_LIB": "/venv/site-packages/nvidia/cu13/lib",
+        })
 
     def test_cache_policy_separates_kv_prefix_and_residency(self):
         details = bench.describe_cache_policy(

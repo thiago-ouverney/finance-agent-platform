@@ -605,7 +605,10 @@ def hardware_snapshot():
 def runtime_environment(cfg):
     common = {"CUDA_VISIBLE_DEVICES"}
     names = {
-        "vllm": common | {"VLLM_ATTENTION_BACKEND", "VLLM_WORKER_MULTIPROC_METHOD"},
+        "vllm": common | {
+            "VLLM_ATTENTION_BACKEND", "VLLM_WORKER_MULTIPROC_METHOD",
+            "VLLM_CUDA_RUNTIME_LIB",
+        },
         "llama.cpp": common | {"GGML_CUDA_ENABLE_UNIFIED_MEMORY", "GGML_BACKEND_PATH"},
         "ollama": common | {
             "OLLAMA_KEEP_ALIVE", "OLLAMA_KV_CACHE_TYPE", "OLLAMA_FLASH_ATTENTION",

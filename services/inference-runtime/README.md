@@ -33,6 +33,12 @@ O preflight do vLLM exige o executável `ninja`: o FlashInfer pode compilar
 kernels CUDA no primeiro aquecimento. `make observe-system-install` instala e
 valida as dependências do sistema em imagens Ubuntu/Debian executadas como root.
 
+Quando o wheel do vLLM instala `libcudart.so.13` no próprio venv, o fluxo
+`observe-*` detecta `site-packages/nvidia/cu13/lib` e o inclui no ambiente do
+servidor. Isso é independente do toolkit CUDA 12.x usado para compilar
+llama.cpp. Para um layout não padrão, use
+`OBS_VLLM_CUDA_RUNTIME_LIB=/caminho/para/lib`.
+
 O repositório é público, portanto HTTPS é o caminho mais simples para clonar no Pod e não exige chave SSH. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `./.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
 
 ### SSH no Pod (somente se precisar fazer push)
