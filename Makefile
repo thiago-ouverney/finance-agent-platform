@@ -12,6 +12,9 @@ MOPEP_PERF_WORKLOAD_DIR ?= /tmp/mopep-runtime-workload/$(MOPEP_PERF_SPLIT)
 MOPEP_PERF_TOKENIZER ?= Qwen/Qwen2.5-7B-Instruct
 MOPEP_PERF_TOKENIZER_REVISION ?=
 MOPEP_PERF_THRESHOLD_MANIFEST ?=
+MOPEP_PERF_SAMPLE_PER_BUCKET ?=
+MOPEP_PERF_SAMPLE_SEED ?= 42
+MOPEP_PERF_SAMPLE_DATASET ?=
 MOPEP_PERF_REMOTE_DIR ?= /workspace/data/mopep-runtime-workload/$(MOPEP_PERF_SPLIT)
 MOPEP_PERF_RESULTS_DIR ?= services/inference-runtime/results-from-pod
 MOPEP_PERF_DATASET_DIR ?= analytics/data/mopep-runtime-comparison
@@ -219,7 +222,9 @@ mopep-performance-workload:
 		--dataset "$(MOPEP_PERF_DATASET)" --warmup-dataset "$(MOPEP_PERF_WARMUP_DATASET)" \
 		--output-dir "$(MOPEP_PERF_WORKLOAD_DIR)" --split "$(MOPEP_PERF_SPLIT)" \
 		--tokenizer "$(MOPEP_PERF_TOKENIZER)" --tokenizer-revision "$(MOPEP_PERF_TOKENIZER_REVISION)" \
-		$(if $(strip $(MOPEP_PERF_THRESHOLD_MANIFEST)),--threshold-manifest "$(MOPEP_PERF_THRESHOLD_MANIFEST)")
+		$(if $(strip $(MOPEP_PERF_THRESHOLD_MANIFEST)),--threshold-manifest "$(MOPEP_PERF_THRESHOLD_MANIFEST)") \
+		$(if $(strip $(MOPEP_PERF_SAMPLE_PER_BUCKET)),--sample-per-bucket "$(MOPEP_PERF_SAMPLE_PER_BUCKET)" --sample-seed "$(MOPEP_PERF_SAMPLE_SEED)") \
+		$(if $(strip $(MOPEP_PERF_SAMPLE_DATASET)),--sample-dataset-out "$(MOPEP_PERF_SAMPLE_DATASET)")
 
 push-mopep-performance-workload:
 	@test -n "$(REMOTE_HOST)" || { echo 'Informe REMOTE_HOST=runpod-qwen.' >&2; exit 1; }

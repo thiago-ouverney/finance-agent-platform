@@ -11,3 +11,4 @@ db-dtypes==1.7.0
 openai==2.29.0
 tqdm==4.70.0
 ollama==0.6.2
+transformers==5.17.0

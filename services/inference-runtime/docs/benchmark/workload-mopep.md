@@ -13,6 +13,17 @@ prompt, heurísticas, tokenizer e os limites de tercis calculados na calibraçã
 O teste deve apontar para o manifesto da calibração. Recalcular tercis no teste
 é inválido porque altera a definição dos grupos depois de observar a amostra.
 
+Uma campanha piloto pode selecionar uma quantidade fixa por bucket com
+`--sample-per-bucket` e `--sample-seed`. A seleção ordena cada bucket pelo
+SHA-256 de `seed:request_id`, portanto não depende da ordem do CSV nem do
+gerador aleatório da biblioteca. O manifesto registra estratégia, seed,
+disponibilidade, contagem escolhida, hash dos IDs e hash do CSV local.
+
+O CSV selecionado preserva as tags esperadas para a avaliação local. Ele não
+entra em `SHA256SUMS` nem no pacote enviado ao Pod. `workload.jsonl` continua
+sem tags, e o alvo de upload transfere somente workload, warm-up, manifesto e
+checksums.
+
 ## Perfis
 
 - `mopep-single`: uma chamada independente por BMC, turno 1.

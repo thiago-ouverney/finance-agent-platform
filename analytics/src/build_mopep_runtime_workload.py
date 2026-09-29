@@ -78,6 +78,94 @@ def load_source(path: Path) -> pd.DataFrame:
     return selected.reset_index(drop=True)
 
 
+def deterministic_bucket_sample(
+    source: pd.DataFrame,
+    *,
+    tokenizer: Any,
+    thresholds: dict[str, int],
+    per_bucket: int,
+    seed: int,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if per_bucket <= 0:
+        raise ValueError("--sample-per-bucket deve ser maior que zero.")
+    ranked = source.copy()
+    ranked["_rendered_prompt_tokens"] = [
+        rendered_tokens(tokenizer, build_prompt(value))
+        for value in ranked["business_model"]
+    ]
+    ranked["_bucket"] = ranked["_rendered_prompt_tokens"].map(
+        lambda value: bucket_for(value, thresholds)
+    )
+    ranked["_sample_rank"] = ranked["request_id"].map(
+        lambda request_id: hashlib.sha256(
+            f"{seed}:{request_id}".encode("utf-8")
+        ).hexdigest()
+    )
+    selected = []
+    available_counts = {}
+    bucket_order = {"short": 0, "medium": 1, "heavy": 2}
+    for name in bucket_order:
+        candidates = ranked.loc[ranked["_bucket"] == name].sort_values(
+            ["_sample_rank", "request_id"]
+        )
+        available_counts[name] = len(candidates)
+        if len(candidates) < per_bucket:
+            raise ValueError(
+                f"Bucket {name} possui {len(candidates)} exemplos; "
+                f"a amostra exige {per_bucket}."
+            )
+        chosen = candidates.head(per_bucket).copy()
+        chosen["_sample_position"] = range(len(chosen))
+        chosen["_bucket_order"] = bucket_order[name]
+        selected.append(chosen)
+    sampled = pd.concat(selected, ignore_index=True).sort_values(
+        ["_sample_position", "_bucket_order", "_sample_rank", "request_id"]
+    )
+    selected_ids = sampled["request_id"].tolist()
+    metadata = {
+        "strategy": "sha256-ranked-within-frozen-token-bucket",
+        "seed": seed,
+        "per_bucket": per_bucket,
+        "source_request_count": len(source),
+        "selected_request_count": len(sampled),
+        "available_bucket_counts": available_counts,
+        "selected_ids_sha256": hashlib.sha256(
+            "\n".join(selected_ids).encode("utf-8")
+        ).hexdigest(),
+    }
+    sampled = sampled.rename(columns={
+        "_bucket": "bucket",
+        "_rendered_prompt_tokens": "rendered_prompt_tokens",
+    })
+    return sampled[[
+        "request_id", "business_model", "bucket", "rendered_prompt_tokens"
+    ]].reset_index(drop=True), metadata
+
+
+def write_sample_dataset(
+    source_path: Path, sampled_source: pd.DataFrame, output_path: Path
+) -> None:
+    frame = pd.read_csv(source_path)
+    id_column = "example_id" if "example_id" in frame else "id" if "id" in frame else None
+    if id_column is None:
+        raise ValueError(f"Coluna example_id ou id ausente em {source_path}.")
+    frame[id_column] = frame[id_column].astype(str)
+    request_ids = sampled_source["request_id"].tolist()
+    order = {request_id: index for index, request_id in enumerate(request_ids)}
+    sampled = frame.loc[frame[id_column].isin(order)].copy()
+    sampled["_sample_order"] = sampled[id_column].map(order)
+    sampled = sampled.sort_values("_sample_order").drop(columns="_sample_order")
+    if len(sampled) != len(request_ids):
+        raise ValueError("A amostra local não preservou todos os IDs selecionados.")
+    details = sampled_source.set_index("request_id")
+    sampled["bucket"] = sampled[id_column].map(details["bucket"])
+    sampled["rendered_prompt_tokens"] = sampled[id_column].map(
+        details["rendered_prompt_tokens"]
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sampled.to_csv(output_path, index=False)
+
+
 def build_records(frame: pd.DataFrame, tokenizer: Any, thresholds: dict[str, int]) -> list[dict[str, Any]]:
     review = build_review_prompt()
     records = []
@@ -107,11 +195,16 @@ def build_workload(
     tokenizer_name: str, tokenizer_revision: str, split: str,
     threshold_manifest: Path | None = None, warmup_count: int = 3,
     limit: int | None = None,
+    sample_per_bucket: int | None = None, sample_seed: int = 42,
+    sample_dataset_out: Path | None = None,
 ) -> dict[str, Any]:
     source = load_source(dataset)
-    if limit is not None:
-        source = source.head(limit)
-    prompts = [build_prompt(value) for value in source["business_model"]]
+    if limit is not None and sample_per_bucket is not None:
+        raise ValueError("Use --limit ou --sample-per-bucket, não ambos.")
+    if sample_dataset_out is not None and sample_per_bucket is None:
+        raise ValueError("--sample-dataset-out exige --sample-per-bucket.")
+    threshold_source = source.head(limit) if limit is not None else source
+    prompts = [build_prompt(value) for value in threshold_source["business_model"]]
     lengths = [rendered_tokens(tokenizer, prompt) for prompt in prompts]
     if threshold_manifest:
         reference = json.loads(threshold_manifest.read_text(encoding="utf-8"))
@@ -122,6 +215,31 @@ def build_workload(
             raise ValueError("Splits diferentes de calibration exigem --threshold-manifest.")
         thresholds = tercile_thresholds(lengths)
         threshold_source_sha256 = None
+
+    sampling = None
+    sampled_dataset_path = None
+    if sample_per_bucket is not None:
+        source, sampling = deterministic_bucket_sample(
+            source,
+            tokenizer=tokenizer,
+            thresholds=thresholds,
+            per_bucket=sample_per_bucket,
+            seed=sample_seed,
+        )
+        sampled_dataset_path = sample_dataset_out or (
+            output_dir / f"{split}-{sample_per_bucket * 3}.csv"
+        )
+        write_sample_dataset(
+            dataset,
+            source,
+            sampled_dataset_path,
+        )
+        sampling["selected_dataset_file"] = sampled_dataset_path.name
+        sampling["selected_dataset_sha256"] = sha256_file(sampled_dataset_path)
+        sampling["selected_dataset_local_only"] = True
+        sampling["selected_dataset_in_upload"] = False
+    elif limit is not None:
+        source = source.head(limit)
 
     warmup_source = load_source(warmup_dataset)
     selected_ids = set(source["request_id"])
@@ -163,6 +281,7 @@ def build_workload(
             name: sum(row["bucket"] == name for row in records)
             for name in ("short", "medium", "heavy")
         },
+        "sampling": sampling,
         "tokenizer": tokenizer_contract,
         **prompt_contract(),
         "privacy": {
@@ -196,6 +315,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--threshold-manifest", type=Path)
     result.add_argument("--warmup-count", type=int, default=3)
     result.add_argument("--limit", type=int)
+    result.add_argument("--sample-per-bucket", type=int)
+    result.add_argument("--sample-seed", type=int, default=42)
+    result.add_argument("--sample-dataset-out", type=Path)
     return result
 
 
@@ -213,6 +335,8 @@ def main() -> None:
         tokenizer_name=args.tokenizer, tokenizer_revision=args.tokenizer_revision,
         split=args.split, threshold_manifest=args.threshold_manifest,
         warmup_count=args.warmup_count, limit=args.limit,
+        sample_per_bucket=args.sample_per_bucket, sample_seed=args.sample_seed,
+        sample_dataset_out=args.sample_dataset_out,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
 
