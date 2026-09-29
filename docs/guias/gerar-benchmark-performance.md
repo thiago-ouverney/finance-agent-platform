@@ -124,8 +124,17 @@ O pacote do vLLM pode trazer `libcudart.so.13` dentro do próprio ambiente
 Python mesmo quando o toolkit usado para compilar llama.cpp é CUDA 12.x. O Make
 detecta `site-packages/nvidia/cu13/lib`, acrescenta-o ao `LD_LIBRARY_PATH` dos
 processos vLLM e registra o diretório em `VLLM_CUDA_RUNTIME_LIB`. Não é
-necessário substituir o toolkit do Pod. Se a distribuição instalar a biblioteca
-em outro local, informe `OBS_VLLM_CUDA_RUNTIME_LIB=/caminho/para/lib`.
+necessário substituir o toolkit global do Pod para executar o runtime. Se a
+distribuição instalar a biblioteca em outro local, informe
+`OBS_VLLM_CUDA_RUNTIME_LIB=/caminho/para/lib`.
+
+Há uma exigência adicional para compilar o plugin GGUF: o `nvcc` deve ter a
+mesma família CUDA do PyTorch. No lock padrão isso significa CUDA 13.0. O modo
+`managed` seleciona `/usr/local/cuda-13.0`, instala `cuda-toolkit-13-0` pelo
+`apt` se estiver ausente e valida a versão antes de chamar `pip`. A instalação
+automática requer root e o repositório NVIDIA configurado na imagem. Use
+`OBS_VLLM_CUDA_HOME` para outro caminho ou
+`OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT=0` para exigir preparação manual.
 
 No Ollama, a rodada também fixa e registra `KEEP_ALIVE=-1`, KV `f16`, flash
 attention ligada, um modelo carregado e paralelismo 1. Esses valores podem ser

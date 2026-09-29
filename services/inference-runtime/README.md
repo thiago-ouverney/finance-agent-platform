@@ -40,7 +40,9 @@ o wheel x86-64 oficial de `vllm==0.29.0` por URL e SHA-256,
 13.0 e o commit do plugin GGUF declarado em
 `OBS_VLLM_GGUF_PLUGIN_REVISION`. O fluxo registra a identidade e as tags do
 wheel realmente instalado, versões observadas, driver, GPU, bibliotecas CUDA e
-resultado UVA em `observability/.state/headless/vllm-environment.json`.
+resultado UVA em `observability/.state/headless/vllm-environment.json`. Quando
+o formato é GGUF, o manifesto também registra `CUDA_HOME`, o caminho do `nvcc`
+e a versão do toolkit que compilou o plugin.
 Em outra arquitetura, sobrescreva `OBS_VLLM_WHEEL` com o wheel e o fragmento
 `#sha256=` correspondentes.
 
@@ -49,6 +51,15 @@ Quando o lock instala `libcudart.so.13` no venv, o modo `managed` detecta
 `existing`, o ambiente da imagem não é alterado. Para um layout não padrão,
 informe conscientemente
 `OBS_VLLM_CUDA_RUNTIME_LIB=/caminho/para/lib`.
+
+O runtime empacotado e o toolkit de compilação são dependências diferentes. O
+plugin GGUF possui código nativo e precisa ser compilado com a mesma família
+CUDA do PyTorch. No modo `managed` com GGUF, o fluxo usa por padrão
+`OBS_VLLM_CUDA_HOME=/usr/local/cuda-13.0`; se o `nvcc` não existir, instala
+`cuda-toolkit-13-0` pelo `apt` antes de compilar. Isso exige root e que o
+repositório NVIDIA esteja disponível na imagem. Para uma imagem já preparada,
+use outro `OBS_VLLM_CUDA_HOME`; para proibir instalações automáticas, defina
+`OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT=0`.
 
 ### Preflight rápido do vLLM
 
@@ -63,8 +74,10 @@ O alvo consulta o driver, detecta runtimes CUDA empacotados, importa PyTorch e
 vLLM e executa uma alocação pinned seguida de
 `get_accelerator_view_from_cpu_tensor` e `torch.cuda.synchronize()`. CUDA 13 é
 recusado antes do import em drivers anteriores a `580.65.06`; a chamada UVA é
-a validação final para incompatibilidades mais específicas. Na instalação
-`managed`, a checagem do driver também ocorre antes do download do wheel.
+a validação final para incompatibilidades mais específicas. Em um fluxo GGUF
+gerenciado, o alvo também exige que `nvcc --version` corresponda ao CUDA do
+PyTorch antes de compilar o plugin. Na instalação `managed`, a checagem do
+driver também ocorre antes do download do wheel.
 
 Para reutilizar um runtime que já veio coerente na imagem, sem instalar nada
 sobre ele:
@@ -401,6 +414,12 @@ make quick-sweep-ollama MODEL_SIZE=7B
 Cada alvo usa por padrão início em 1024, passo de 256 MB de KV lógico, máximo 16384 e uma repetição. O número equivalente de tokens é calculado pela arquitetura: aproximadamente 4465 tokens por salto no Qwen2.5 7B. Para uma verificação rápida, use `quick-sweep-<runtime>`; ela limita o contexto a 8192, usa uma requisição, uma repetição e nenhum aquecimento. Para validar apenas um ponto, use `SWEEP_MAX_CONTEXT=1024`. É uma verificação de integração do launcher, API e coleta; a amostra não sustenta comparação estatística nem substitui o sweep formal.
 
 ### Estado da validação no Pod
+
+O lock atual do vLLM também foi validado em 28/09/2026 em uma RTX 3090 única,
+com driver `580.159.03`, `vllm==0.29.0`, `torch==2.13.0+cu130` e
+`cuda-toolkit-13-0`. O preflight UVA passou e o plugin GGUF compilou depois que
+`CUDA_HOME` deixou de apontar para o toolkit 12.8 da imagem e passou a usar
+`/usr/local/cuda-13.0`.
 
 A integração foi validada ao vivo em 22/09/2026 no RunPod, com o mesmo GGUF 7B e uma RTX 3090. O comando `bench-all` reduzido terminou com:
 

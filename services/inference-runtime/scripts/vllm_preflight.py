@@ -24,6 +24,7 @@ from typing import Any
 
 VERSION_RE = re.compile(r"\d+")
 CUDA_DIR_RE = re.compile(r"^cu(?P<major>\d{2,})$")
+NVCC_RELEASE_RE = re.compile(r"\brelease\s+(?P<version>\d+\.\d+)\b")
 # CUDA Toolkit 13.0 release notes, table 3 (Linux x86_64 GA drivers):
 # https://docs.nvidia.com/cuda/archive/13.0.0/cuda-toolkit-release-notes/
 CUDA_12_MINIMUM_DRIVERS = {
@@ -88,6 +89,43 @@ def validate_driver_compatibility(driver: str, cuda_versions: list[str]) -> None
             "driver NVIDIA incompatível com o runtime CUDA do vLLM: "
             f"driver={driver}, cuda={families}, mínimo={required_text}. "
             "Use uma imagem/runtime CUDA compatível ou atualize o driver do host."
+        )
+
+
+def parse_nvcc_version(output: str) -> str:
+    """Extract the CUDA toolkit release from ``nvcc --version`` output."""
+    match = NVCC_RELEASE_RE.search(output)
+    if not match:
+        raise RuntimeError(f"saída inesperada do nvcc: {output.strip()!r}")
+    return match.group("version")
+
+
+def query_nvcc(cuda_home: str) -> tuple[str, str]:
+    """Return the selected nvcc path and its CUDA toolkit release."""
+    if not cuda_home:
+        raise RuntimeError("a validação do compilador exige --cuda-home")
+    nvcc = Path(cuda_home) / "bin" / "nvcc"
+    if not nvcc.is_file() or not os.access(nvcc, os.X_OK):
+        raise RuntimeError(
+            f"nvcc não encontrado em {nvcc}; instale o toolkit CUDA compatível "
+            "ou informe OBS_VLLM_CUDA_HOME"
+        )
+    result = subprocess.run(
+        [str(nvcc), "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return str(nvcc.resolve()), parse_nvcc_version(result.stdout + result.stderr)
+
+
+def validate_compiler_compatibility(nvcc_cuda: str, torch_cuda: str) -> None:
+    """Require native extensions to use the same CUDA family as PyTorch."""
+    if version_tuple(nvcc_cuda)[:2] != version_tuple(torch_cuda)[:2]:
+        raise RuntimeError(
+            "toolkit CUDA incompatível com o PyTorch usado pelo vLLM: "
+            f"nvcc={nvcc_cuda}, torch={torch_cuda}. Selecione um CUDA_HOME "
+            "da mesma família antes de compilar o plugin GGUF."
         )
 
 
@@ -210,6 +248,8 @@ def parse_args() -> argparse.Namespace:
         "--plugin-state", choices=("expected", "require"), default="expected"
     )
     parser.add_argument("--driver-only", action="store_true")
+    parser.add_argument("--require-compiler", action="store_true")
+    parser.add_argument("--cuda-home", default=os.environ.get("CUDA_HOME", ""))
     parser.add_argument(
         "--cuda-runtime-lib", default=os.environ.get("VLLM_CUDA_RUNTIME_LIB", "")
     )
@@ -247,6 +287,14 @@ def main() -> int:
             set([*detected_cuda, torch.version.cuda]), key=version_tuple
         )
     validate_driver_compatibility(driver, detected_cuda)
+
+    nvcc_path = None
+    nvcc_cuda_version = None
+    if args.require_compiler:
+        if not torch.version.cuda:
+            raise RuntimeError("PyTorch não informou sua versão CUDA")
+        nvcc_path, nvcc_cuda_version = query_nvcc(args.cuda_home)
+        validate_compiler_compatibility(nvcc_cuda_version, torch.version.cuda)
 
     # Only load vLLM native code after the CUDA/driver check succeeds.
     import vllm
@@ -290,6 +338,7 @@ def main() -> int:
             "torch_version": args.expected_torch_version,
             "cuda_version": args.expected_cuda_version,
             "gguf_plugin_revision": args.plugin_revision,
+            "cuda_home": args.cuda_home,
         },
         "observed": {
             "vllm_version": vllm.__version__,
@@ -298,6 +347,8 @@ def main() -> int:
             "torch_cuda_version": torch.version.cuda,
             "cuda_runtime_families": detected_cuda,
             "cuda_runtime_libraries": runtime_libraries,
+            "nvcc_path": nvcc_path,
+            "nvcc_cuda_version": nvcc_cuda_version,
             "driver_version": driver,
             "gpu": gpu,
             "gguf_plugin_version": plugin_version,
@@ -309,7 +360,8 @@ def main() -> int:
     print(
         "VLLM PREFLIGHT OK: "
         f"mode={args.mode} vllm={vllm.__version__} torch={torch.__version__} "
-        f"cuda={torch.version.cuda} driver={driver} gpu={gpu} uva={cuda_view}"
+        f"cuda={torch.version.cuda} driver={driver} gpu={gpu} uva={cuda_view} "
+        f"nvcc={nvcc_cuda_version or 'não exigido'}"
     )
     print(f"manifest={args.output}")
     return 0

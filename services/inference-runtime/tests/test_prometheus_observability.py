@@ -19,6 +19,8 @@ from scripts.prometheus_stack import assert_port_available, render_config, wait_
 from scripts.vllm_preflight import (
     cuda_version_from_directory,
     minimum_driver_for_cuda,
+    parse_nvcc_version,
+    validate_compiler_compatibility,
     validate_driver_compatibility,
 )
 
@@ -213,6 +215,15 @@ class VllmPreflightTests(unittest.TestCase):
     def test_cuda_13_accepts_driver_580_family(self):
         validate_driver_compatibility("580.159.04", ["13.0"])
 
+    def test_nvcc_release_is_read_from_version_output(self):
+        output = "Cuda compilation tools, release 13.0, V13.0.88"
+        self.assertEqual(parse_nvcc_version(output), "13.0")
+
+    def test_plugin_compiler_must_match_pytorch_cuda_family(self):
+        validate_compiler_compatibility("13.0", "13.0")
+        with self.assertRaisesRegex(RuntimeError, "toolkit CUDA incompatível"):
+            validate_compiler_compatibility("12.8", "13.0")
+
 
 class ObservabilityMakeTests(unittest.TestCase):
     def make_dry_run(self, target: str, *variables: str) -> str:
@@ -335,6 +346,29 @@ class ObservabilityMakeTests(unittest.TestCase):
         )
         self.assertIn("e2b8ad532b8b5ea175100202c30430c1d2b5e6a8", output)
         self.assertIn("--no-build-isolation", output)
+
+    def test_managed_gguf_selects_cuda_13_toolkit_before_plugin_build(self):
+        output = self.make_dry_run(
+            "observe-install-vllm", "OBS_MODEL_SOURCE=local-gguf",
+            "OBS_MODEL=/workspace/model.gguf",
+        )
+        self.assertIn("cuda-toolkit-13-0", output)
+        self.assertIn('vllm_cuda_home="/usr/local/cuda-13.0"', output)
+        self.assertIn("--require-compiler", output)
+        self.assertLess(output.index("--require-compiler"),
+                        output.index("--no-build-isolation"))
+
+    def test_hf_and_existing_modes_do_not_install_cuda_toolkit(self):
+        hf = self.make_dry_run("observe-install-vllm", "OBS_MODEL_SOURCE=hf")
+        existing = self.make_dry_run(
+            "observe-install-vllm", "OBS_MODEL_SOURCE=local-gguf",
+            "OBS_VLLM_ENV_MODE=existing",
+            "OBS_VLLM_PYTHON=/app/.vllm_venv/bin/python",
+            "OBS_VLLM_BIN=/usr/local/bin/vllm",
+        )
+        self.assertNotIn("apt-get install -y \"cuda-toolkit-13-0\"", hf)
+        self.assertNotIn("apt-get install -y \"cuda-toolkit-13-0\"", existing)
+        self.assertNotIn("--require-compiler", existing)
 
     def test_model_source_runtime_matrix_rejects_hf_on_llama(self):
         result = subprocess.run(

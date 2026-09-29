@@ -57,6 +57,9 @@ OBS_VLLM_TORCH_BACKEND ?= cu130
 OBS_VLLM_EXPECTED_VERSION ?= 0.29.0
 OBS_VLLM_EXPECTED_TORCH_VERSION ?= 2.13.0+cu130
 OBS_VLLM_EXPECTED_CUDA_VERSION ?= 13.0
+OBS_VLLM_CUDA_HOME ?= /usr/local/cuda-13.0
+OBS_VLLM_CUDA_TOOLKIT_PACKAGE ?= cuda-toolkit-13-0
+OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT ?= 1
 OBS_VLLM_ENV_MANIFEST ?= $(OBS_STATE_DIR)/vllm-environment.json
 OBS_VLLM_GGUF_PLUGIN_DIR ?= /workspace/runtimes/vllm-gguf-plugin
 OBS_VLLM_GGUF_PLUGIN_REVISION ?= e2b8ad532b8b5ea175100202c30430c1d2b5e6a8
@@ -66,6 +69,27 @@ OBS_VLLM_GPU_MEMORY_UTILIZATION ?= 0.90
 OBS_VLLM_MAX_NUM_SEQS ?= 1
 OBS_VLLM_EXTRA_ARGS ?=
 OBS_VLLM_CUDA_RUNTIME_LIB ?=
+OBS_VLLM_NEEDS_COMPILER = $(if $(and $(filter managed,$(OBS_VLLM_ENV_MODE)),$(filter gguf local-gguf,$(OBS_VLLM_FORMAT) $(OBS_MODEL_SOURCE))),1,)
+
+# O plugin GGUF contém extensão nativa. O nvcc usado no build precisa pertencer
+# à mesma família CUDA do PyTorch fixado no lock do vLLM.
+define OBS_VLLM_ENSURE_CUDA_TOOLKIT
+case "$(OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT)" in 0|1) ;; *) echo 'OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT deve ser 0 ou 1.' >&2; exit 2 ;; esac
+vllm_cuda_home="$(OBS_VLLM_CUDA_HOME)"
+if ! test -x "$$vllm_cuda_home/bin/nvcc"; then \
+	if test "$(OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT)" != 1; then \
+		echo "nvcc ausente em $$vllm_cuda_home; instale $(OBS_VLLM_CUDA_TOOLKIT_PACKAGE) ou ajuste OBS_VLLM_CUDA_HOME." >&2; exit 1; \
+	fi; \
+	command -v apt-get >/dev/null || { echo 'A instalação automática do toolkit exige Ubuntu/Debian; instale-o na imagem ou use OBS_VLLM_CUDA_HOME.' >&2; exit 1; }; \
+	test "$$(id -u)" -eq 0 || { echo 'A instalação automática do toolkit exige root; instale-o antes ou use OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT=0.' >&2; exit 1; }; \
+	echo '[OBSERVE] instalando $(OBS_VLLM_CUDA_TOOLKIT_PACKAGE) para compilar o plugin GGUF'; \
+	DEBIAN_FRONTEND=noninteractive apt-get install -y "$(OBS_VLLM_CUDA_TOOLKIT_PACKAGE)"; \
+fi
+export CUDA_HOME="$$vllm_cuda_home"
+export CUDACXX="$$vllm_cuda_home/bin/nvcc"
+export PATH="$$vllm_cuda_home/bin:$$PATH"
+export LD_LIBRARY_PATH="$$vllm_cuda_home/lib64:$${LD_LIBRARY_PATH:-}"
+endef
 
 # No modo managed, o loader precisa enxergar o libcudart privado do lock CUDA.
 # No modo existing, o ambiente da imagem é preservado; só um caminho informado
@@ -90,7 +114,8 @@ define OBS_VLLM_RUN_PREFLIGHT
 	--vllm-package "$(OBS_VLLM_PACKAGE)" --vllm-wheel "$(OBS_VLLM_WHEEL)" --torch-package "$(OBS_VLLM_TORCH_PACKAGE)" \
 	--torch-backend "$(OBS_VLLM_TORCH_BACKEND)" --expected-vllm-version "$(OBS_VLLM_EXPECTED_VERSION)" \
 	--expected-torch-version "$(OBS_VLLM_EXPECTED_TORCH_VERSION)" --expected-cuda-version "$(OBS_VLLM_EXPECTED_CUDA_VERSION)" \
-	--plugin-revision "$(OBS_VLLM_GGUF_PLUGIN_REVISION)" --plugin-state expected
+	--plugin-revision "$(OBS_VLLM_GGUF_PLUGIN_REVISION)" --plugin-state expected \
+	--cuda-home "$(OBS_VLLM_CUDA_HOME)" $(if $(OBS_VLLM_NEEDS_COMPILER),--require-compiler,)
 endef
 
 define OBS_VLLM_RUN_DRIVER_PREFLIGHT
@@ -167,7 +192,8 @@ observe-help:
 		'' \
 		'Variáveis principais: OBS_RUNTIME, OBS_CONTEXT, OBS_MODEL_ALIAS, OBS_JUPYTER_PORT,' \
 		'OBS_VLLM_MODEL, OBS_VLLM_FORMAT=hf|gguf, OBS_VLLM_ENV_MODE=managed|existing,' \
-		'OBS_VLLM_WHEEL, OBS_VLLM_TORCH_PACKAGE, OBS_VLLM_TORCH_BACKEND, OBS_VLLM_GPU_MEMORY_UTILIZATION,' \
+		'OBS_VLLM_WHEEL, OBS_VLLM_TORCH_PACKAGE, OBS_VLLM_TORCH_BACKEND, OBS_VLLM_CUDA_HOME,' \
+		'OBS_VLLM_CUDA_TOOLKIT_PACKAGE, OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT, OBS_VLLM_GPU_MEMORY_UTILIZATION,' \
 		'OBS_GGUF_REPO, OBS_GGUF_FILENAME, OBS_GGUF_MODEL e *_EXTRA_ARGS.' \
 		'' \
 		'Headless: OBS_MODEL_SOURCE=hf|local-hf|gguf|local-gguf, OBS_MODEL, OBS_REVISION,' \
@@ -184,6 +210,7 @@ observe-config: observe-check-runtime
 		"context=$(OBS_CONTEXT)" \
 		"vllm_env_mode=$(OBS_VLLM_ENV_MODE)" \
 		"vllm_lock=$(OBS_VLLM_WHEEL),$(OBS_VLLM_TORCH_PACKAGE),$(OBS_VLLM_TORCH_BACKEND),plugin@$(OBS_VLLM_GGUF_PLUGIN_REVISION)" \
+		"vllm_cuda_toolkit=$(OBS_VLLM_CUDA_HOME),$(OBS_VLLM_CUDA_TOOLKIT_PACKAGE),auto_install=$(OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT)" \
 		"vllm_format=$(OBS_VLLM_FORMAT)" \
 		"vllm_model=$(OBS_VLLM_MODEL)" \
 		"gguf_model=$(OBS_GGUF_MODEL)" \
@@ -252,6 +279,7 @@ observe-install-vllm:
 		test -x "$(OBS_VLLM_BIN)" || { echo 'Modo existing exige OBS_VLLM_BIN apontando para o vLLM executável da imagem.' >&2; exit 1; }; \
 		echo '[OBSERVE] reutilizando runtime vLLM existente; nenhuma instalação pip/uv será executada.'; \
 	fi
+	$(if $(OBS_VLLM_NEEDS_COMPILER),$(OBS_VLLM_ENSURE_CUDA_TOOLKIT))
 	$(OBS_VLLM_EXPORT_CUDA_RUNTIME)
 	$(OBS_VLLM_RUN_PREFLIGHT)
 	if test "$(OBS_VLLM_FORMAT)" = gguf || test "$(OBS_MODEL_SOURCE)" = gguf || test "$(OBS_MODEL_SOURCE)" = local-gguf; then \
@@ -276,11 +304,13 @@ observe-install-vllm:
 			--vllm-package "$(OBS_VLLM_PACKAGE)" --vllm-wheel "$(OBS_VLLM_WHEEL)" --torch-package "$(OBS_VLLM_TORCH_PACKAGE)" \
 			--torch-backend "$(OBS_VLLM_TORCH_BACKEND)" --expected-vllm-version "$(OBS_VLLM_EXPECTED_VERSION)" \
 			--expected-torch-version "$(OBS_VLLM_EXPECTED_TORCH_VERSION)" --expected-cuda-version "$(OBS_VLLM_EXPECTED_CUDA_VERSION)" \
-			--plugin-revision "$(OBS_VLLM_GGUF_PLUGIN_REVISION)" --plugin-state require; \
+			--plugin-revision "$(OBS_VLLM_GGUF_PLUGIN_REVISION)" --plugin-state require \
+			--cuda-home "$(OBS_VLLM_CUDA_HOME)" $(if $(OBS_VLLM_NEEDS_COMPILER),--require-compiler,); \
 	fi
 
 observe-vllm-preflight:
 	@test -x "$(OBS_VLLM_PYTHON)" || { echo 'Python do vLLM ausente; informe OBS_VLLM_PYTHON ou instale o runtime.' >&2; exit 1; }
+	$(if $(OBS_VLLM_NEEDS_COMPILER),$(OBS_VLLM_ENSURE_CUDA_TOOLKIT))
 	$(OBS_VLLM_EXPORT_CUDA_RUNTIME)
 	$(OBS_VLLM_RUN_PREFLIGHT)
 

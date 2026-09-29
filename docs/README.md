@@ -269,7 +269,10 @@ pacote é baixado com `make pull-observe-results` e analisado localmente com
 No vLLM, `make observe-vllm-preflight` valida em poucos segundos a família do
 runtime CUDA contra o driver e executa a operação UVA usada pelo próprio vLLM.
 O modo `managed` instala e registra como um conjunto o wheel vLLM, PyTorch,
-backend CUDA e revisão do plugin GGUF. O modo `existing` reutiliza
+backend CUDA, toolkit/nvcc usado na compilação e revisão do plugin GGUF. Para
+GGUF gerenciado, o `nvcc` deve pertencer à mesma família CUDA do PyTorch; o
+fluxo seleciona `/usr/local/cuda-13.0` e pode instalar `cuda-toolkit-13-0`
+antes do build. O modo `existing` reutiliza
 conscientemente o runtime da imagem, informado por `OBS_VLLM_PYTHON` e
 `OBS_VLLM_BIN`, sem executar instalação `pip`/`uv` sobre ele. O preflight roda
 antes do plugin GGUF, do modelo e do Prometheus; o ambiente observado fica em
