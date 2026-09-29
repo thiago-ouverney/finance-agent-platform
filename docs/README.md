@@ -266,6 +266,15 @@ pacote portátil com requisições, eventos, amostras e agregações por fase. O
 pacote é baixado com `make pull-observe-results` e analisado localmente com
 `make observability-dataset` e `make observability-notebook`.
 
+No vLLM, `make observe-vllm-preflight` valida em poucos segundos a família do
+runtime CUDA contra o driver e executa a operação UVA usada pelo próprio vLLM.
+O modo `managed` instala e registra como um conjunto o wheel vLLM, PyTorch,
+backend CUDA e revisão do plugin GGUF. O modo `existing` reutiliza
+conscientemente o runtime da imagem, informado por `OBS_VLLM_PYTHON` e
+`OBS_VLLM_BIN`, sem executar instalação `pip`/`uv` sobre ele. O preflight roda
+antes do plugin GGUF, do modelo e do Prometheus; o ambiente observado fica em
+`observability/.state/headless/vllm-environment.json`.
+
 Na análise offline, cada runtime usa um `run_id` explícito e mantém sua própria
 conclusão. A comparação só é exibida quando as três runs compartilham a mesma
 identidade experimental e as mesmas requisições pareadas.

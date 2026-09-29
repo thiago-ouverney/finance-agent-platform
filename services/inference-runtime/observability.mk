@@ -48,7 +48,16 @@ OBS_VLLM_MODEL ?= Qwen/Qwen2.5-7B-Instruct
 OBS_VLLM_VENV ?= $(OBS_VENVS_DIR)/vllm
 OBS_VLLM_PYTHON ?= $(OBS_VLLM_VENV)/bin/python
 OBS_VLLM_BIN ?= $(OBS_VLLM_VENV)/bin/vllm
+OBS_VLLM_ENV_MODE ?= managed
 OBS_VLLM_PACKAGE ?= vllm==0.29.0
+# Wheel x86-64 publicado no PyPI para vLLM 0.29.0, fixado também pelo SHA-256.
+OBS_VLLM_WHEEL ?= https://files.pythonhosted.org/packages/ca/09/7f79450e21bd1c2a0897ab946a544816a4f7e04c54f0ca49849b14b12d6a/vllm-0.29.0-cp38-abi3-manylinux_2_28_x86_64.whl\#sha256=09d48617fc2be9c6cdcd5db480651ab0d84817b257204f2cc2e3ecbb70bbb635
+OBS_VLLM_TORCH_PACKAGE ?= torch==2.13.0
+OBS_VLLM_TORCH_BACKEND ?= cu130
+OBS_VLLM_EXPECTED_VERSION ?= 0.29.0
+OBS_VLLM_EXPECTED_TORCH_VERSION ?= 2.13.0+cu130
+OBS_VLLM_EXPECTED_CUDA_VERSION ?= 13.0
+OBS_VLLM_ENV_MANIFEST ?= $(OBS_STATE_DIR)/vllm-environment.json
 OBS_VLLM_GGUF_PLUGIN_DIR ?= /workspace/runtimes/vllm-gguf-plugin
 OBS_VLLM_GGUF_PLUGIN_REVISION ?= e2b8ad532b8b5ea175100202c30430c1d2b5e6a8
 OBS_VLLM_PORT ?= 8000
@@ -58,22 +67,36 @@ OBS_VLLM_MAX_NUM_SEQS ?= 1
 OBS_VLLM_EXTRA_ARGS ?=
 OBS_VLLM_CUDA_RUNTIME_LIB ?=
 
-# vLLM 0.29.0 pode instalar um libcudart privado em nvidia/cu13/lib mesmo
-# quando o toolkit do Pod e o PyTorch usam CUDA 12.x. O loader não encontra
-# esse diretório automaticamente, então todos os pontos que importam ou
-# iniciam vLLM devem chamar este bloco no mesmo shell do processo filho.
+# No modo managed, o loader precisa enxergar o libcudart privado do lock CUDA.
+# No modo existing, o ambiente da imagem é preservado; só um caminho informado
+# explicitamente pelo operador é adicionado ao LD_LIBRARY_PATH.
 define OBS_VLLM_EXPORT_CUDA_RUNTIME
 vllm_site_packages=$$("$(OBS_VLLM_PYTHON)" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')
 vllm_cuda_runtime_lib="$(OBS_VLLM_CUDA_RUNTIME_LIB)"
 if test -n "$$vllm_cuda_runtime_lib"; then \
 	test -d "$$vllm_cuda_runtime_lib" || { echo "OBS_VLLM_CUDA_RUNTIME_LIB inexistente: $$vllm_cuda_runtime_lib" >&2; exit 1; }; \
-elif test -f "$$vllm_site_packages/nvidia/cu13/lib/libcudart.so.13"; then \
+elif test "$(OBS_VLLM_ENV_MODE)" = managed && test -f "$$vllm_site_packages/nvidia/cu13/lib/libcudart.so.13"; then \
 	vllm_cuda_runtime_lib="$$vllm_site_packages/nvidia/cu13/lib"; \
 fi
 if test -n "$$vllm_cuda_runtime_lib"; then \
 	export VLLM_CUDA_RUNTIME_LIB="$$vllm_cuda_runtime_lib"; \
 	export LD_LIBRARY_PATH="$$vllm_cuda_runtime_lib:$${LD_LIBRARY_PATH:-}"; \
 fi
+endef
+
+define OBS_VLLM_RUN_PREFLIGHT
+"$(OBS_VLLM_PYTHON)" scripts/vllm_preflight.py \
+	--mode "$(OBS_VLLM_ENV_MODE)" --output "$(OBS_VLLM_ENV_MANIFEST)" \
+	--vllm-package "$(OBS_VLLM_PACKAGE)" --vllm-wheel "$(OBS_VLLM_WHEEL)" --torch-package "$(OBS_VLLM_TORCH_PACKAGE)" \
+	--torch-backend "$(OBS_VLLM_TORCH_BACKEND)" --expected-vllm-version "$(OBS_VLLM_EXPECTED_VERSION)" \
+	--expected-torch-version "$(OBS_VLLM_EXPECTED_TORCH_VERSION)" --expected-cuda-version "$(OBS_VLLM_EXPECTED_CUDA_VERSION)" \
+	--plugin-revision "$(OBS_VLLM_GGUF_PLUGIN_REVISION)" --plugin-state expected
+endef
+
+define OBS_VLLM_RUN_DRIVER_PREFLIGHT
+"$(OBS_SYSTEM_PYTHON)" scripts/vllm_preflight.py \
+	--mode managed --output "$(OBS_VLLM_ENV_MANIFEST)" \
+	--expected-cuda-version "$(OBS_VLLM_EXPECTED_CUDA_VERSION)" --driver-only
 endef
 
 OBS_GGUF_REPO ?= arthuravianna/Qwen2.5-7B-Instruct-Q8_0.gguf
@@ -113,7 +136,7 @@ OBS_RUNTIME_EXTRA_ARGS = $(if $(filter vllm,$(OBS_RUNTIME)),$(OBS_VLLM_EXTRA_ARG
 OBS_OLLAMA_ENV = OLLAMA_MODELS="$(OBS_OLLAMA_MODELS)" OLLAMA_KEEP_ALIVE="$(OBS_OLLAMA_KEEP_ALIVE)" OLLAMA_KV_CACHE_TYPE="$(OBS_OLLAMA_KV_CACHE_TYPE)" OLLAMA_FLASH_ATTENTION="$(OBS_OLLAMA_FLASH_ATTENTION)" OLLAMA_NUM_PARALLEL="$(OBS_OLLAMA_NUM_PARALLEL)" OLLAMA_MAX_LOADED_MODELS="$(OBS_OLLAMA_MAX_LOADED_MODELS)"
 
 .PHONY: observe-help observe-config observe-check-runtime observe-check-model-source observe-system-install observe-tools-install \
-	observe-download-gguf observe-install observe-install-vllm observe-install-llama observe-install-ollama \
+	observe-download-gguf observe-install observe-install-vllm observe-vllm-preflight observe-install-llama observe-install-ollama \
 	observe-prepare observe-prepare-vllm observe-prepare-llama observe-prepare-ollama observe-bootstrap \
 	observe-serve observe-serve-vllm observe-serve-llama observe-serve-ollama \
 	observe-prometheus-start observe-prometheus-stop observe-status \
@@ -129,6 +152,7 @@ observe-help:
 		'  make observe-prometheus-start OBS_RUNTIME=vllm inicia a coleta' \
 		'  make observe-jupyter OBS_RUNTIME=vllm          inicia o notebook no Pod' \
 		'  make observe-config OBS_RUNTIME=vllm           mostra a configuração efetiva' \
+		'  make observe-vllm-preflight                     valida driver, CUDA e UVA em segundos' \
 		'  make observe-status OBS_RUNTIME=vllm           verifica APIs' \
 		'  make observe-prometheus-stop                   encerra a coleta' \
 		'  make observe-bench OBS_RUNTIME=vllm            roda bateria CLI + Prometheus' \
@@ -142,7 +166,8 @@ observe-help:
 		'  make observe-bootstrap OBS_RUNTIME=ollama' \
 		'' \
 		'Variáveis principais: OBS_RUNTIME, OBS_CONTEXT, OBS_MODEL_ALIAS, OBS_JUPYTER_PORT,' \
-		'OBS_VLLM_MODEL, OBS_VLLM_FORMAT=hf|gguf, OBS_VLLM_PACKAGE, OBS_VLLM_GPU_MEMORY_UTILIZATION,' \
+		'OBS_VLLM_MODEL, OBS_VLLM_FORMAT=hf|gguf, OBS_VLLM_ENV_MODE=managed|existing,' \
+		'OBS_VLLM_WHEEL, OBS_VLLM_TORCH_PACKAGE, OBS_VLLM_TORCH_BACKEND, OBS_VLLM_GPU_MEMORY_UTILIZATION,' \
 		'OBS_GGUF_REPO, OBS_GGUF_FILENAME, OBS_GGUF_MODEL e *_EXTRA_ARGS.' \
 		'' \
 		'Headless: OBS_MODEL_SOURCE=hf|local-hf|gguf|local-gguf, OBS_MODEL, OBS_REVISION,' \
@@ -157,6 +182,8 @@ observe-config: observe-check-runtime
 		"base_url=$(OBS_BASE_URL)" \
 		"model_alias=$(OBS_MODEL_ALIAS)" \
 		"context=$(OBS_CONTEXT)" \
+		"vllm_env_mode=$(OBS_VLLM_ENV_MODE)" \
+		"vllm_lock=$(OBS_VLLM_WHEEL),$(OBS_VLLM_TORCH_PACKAGE),$(OBS_VLLM_TORCH_BACKEND),plugin@$(OBS_VLLM_GGUF_PLUGIN_REVISION)" \
 		"vllm_format=$(OBS_VLLM_FORMAT)" \
 		"vllm_model=$(OBS_VLLM_MODEL)" \
 		"gguf_model=$(OBS_GGUF_MODEL)" \
@@ -212,29 +239,50 @@ observe-install: observe-check-runtime
 	@$(MAKE) --no-print-directory "observe-install-$(OBS_RUNTIME)"
 
 observe-install-vllm:
-	@command -v ninja >/dev/null || { echo 'ninja ausente; execute make observe-system-install ou apt-get install -y ninja-build.' >&2; exit 1; }
-	@mkdir -p "$(OBS_VENVS_DIR)"
-	@test -x "$(OBS_VLLM_PYTHON)" || "$(OBS_SYSTEM_PYTHON)" -m venv "$(OBS_VLLM_VENV)"
-	"$(OBS_VLLM_PYTHON)" -m pip install --disable-pip-version-check --upgrade pip uv
-	. "$(OBS_VLLM_VENV)/bin/activate"
-	uv pip install "$(OBS_VLLM_PACKAGE)" --torch-backend=auto
-	if test "$(OBS_VLLM_FORMAT)" = gguf || test "$(OBS_MODEL_SOURCE)" = gguf || test "$(OBS_MODEL_SOURCE)" = local-gguf; then \
-		if ! test -d "$(OBS_VLLM_GGUF_PLUGIN_DIR)/.git"; then \
-			test ! -e "$(OBS_VLLM_GGUF_PLUGIN_DIR)" || test -z "$$(ls -A "$(OBS_VLLM_GGUF_PLUGIN_DIR)")" || { echo 'OBS_VLLM_GGUF_PLUGIN_DIR existe e não é um repositório vazio.' >&2; exit 1; }; \
-			mkdir -p "$(OBS_VLLM_GGUF_PLUGIN_DIR)"; \
-			git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" init -q; \
-			git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" remote add origin https://github.com/vllm-project/vllm-gguf-plugin.git; \
-			git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" fetch --depth 1 origin "$(OBS_VLLM_GGUF_PLUGIN_REVISION)"; \
-			git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" checkout --detach FETCH_HEAD; \
-		else \
-			actual=$$(git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" rev-parse HEAD); \
-			test "$$actual" = "$(OBS_VLLM_GGUF_PLUGIN_REVISION)" || { echo "vllm-gguf-plugin está em $$actual, esperado $(OBS_VLLM_GGUF_PLUGIN_REVISION)." >&2; exit 1; }; \
-		fi; \
-		test -z "$$(git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" status --porcelain --untracked-files=no)" || { echo 'vllm-gguf-plugin possui alterações locais.' >&2; exit 1; }; \
-		"$(OBS_VLLM_PYTHON)" -m pip install --disable-pip-version-check --no-build-isolation "$(OBS_VLLM_GGUF_PLUGIN_DIR)"; \
+	@case "$(OBS_VLLM_ENV_MODE)" in managed|existing) ;; *) echo 'OBS_VLLM_ENV_MODE deve ser managed ou existing.' >&2; exit 2 ;; esac
+	if test "$(OBS_VLLM_ENV_MODE)" = managed; then \
+		$(OBS_VLLM_RUN_DRIVER_PREFLIGHT); \
+		command -v ninja >/dev/null || { echo 'ninja ausente; execute make observe-system-install ou apt-get install -y ninja-build.' >&2; exit 1; }; \
+		mkdir -p "$(OBS_VENVS_DIR)"; \
+		test -x "$(OBS_VLLM_PYTHON)" || "$(OBS_SYSTEM_PYTHON)" -m venv "$(OBS_VLLM_VENV)"; \
+		"$(OBS_VLLM_PYTHON)" -m pip install --disable-pip-version-check --upgrade pip uv; \
+		"$(OBS_VLLM_PYTHON)" -m uv pip install "$(OBS_VLLM_WHEEL)" "$(OBS_VLLM_TORCH_PACKAGE)" --torch-backend="$(OBS_VLLM_TORCH_BACKEND)"; \
+	else \
+		test -x "$(OBS_VLLM_PYTHON)" || { echo 'Modo existing exige OBS_VLLM_PYTHON apontando para um Python executável da imagem.' >&2; exit 1; }; \
+		test -x "$(OBS_VLLM_BIN)" || { echo 'Modo existing exige OBS_VLLM_BIN apontando para o vLLM executável da imagem.' >&2; exit 1; }; \
+		echo '[OBSERVE] reutilizando runtime vLLM existente; nenhuma instalação pip/uv será executada.'; \
 	fi
 	$(OBS_VLLM_EXPORT_CUDA_RUNTIME)
-	"$(OBS_VLLM_PYTHON)" -c 'import torch,vllm; assert torch.cuda.is_available(), "PyTorch não detectou CUDA"; print("vLLM", vllm.__version__); print("GPU", torch.cuda.get_device_name(0))'
+	$(OBS_VLLM_RUN_PREFLIGHT)
+	if test "$(OBS_VLLM_FORMAT)" = gguf || test "$(OBS_MODEL_SOURCE)" = gguf || test "$(OBS_MODEL_SOURCE)" = local-gguf; then \
+		if test "$(OBS_VLLM_ENV_MODE)" = managed; then \
+			if ! test -d "$(OBS_VLLM_GGUF_PLUGIN_DIR)/.git"; then \
+				test ! -e "$(OBS_VLLM_GGUF_PLUGIN_DIR)" || test -z "$$(ls -A "$(OBS_VLLM_GGUF_PLUGIN_DIR)")" || { echo 'OBS_VLLM_GGUF_PLUGIN_DIR existe e não é um repositório vazio.' >&2; exit 1; }; \
+				mkdir -p "$(OBS_VLLM_GGUF_PLUGIN_DIR)"; \
+				git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" init -q; \
+				git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" remote add origin https://github.com/vllm-project/vllm-gguf-plugin.git; \
+				git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" fetch --depth 1 origin "$(OBS_VLLM_GGUF_PLUGIN_REVISION)"; \
+				git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" checkout --detach FETCH_HEAD; \
+			else \
+				actual=$$(git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" rev-parse HEAD); \
+				test "$$actual" = "$(OBS_VLLM_GGUF_PLUGIN_REVISION)" || { echo "vllm-gguf-plugin está em $$actual, esperado $(OBS_VLLM_GGUF_PLUGIN_REVISION)." >&2; exit 1; }; \
+			fi; \
+			test -z "$$(git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" status --porcelain --untracked-files=no)" || { echo 'vllm-gguf-plugin possui alterações locais.' >&2; exit 1; }; \
+			"$(OBS_VLLM_PYTHON)" -m pip install --disable-pip-version-check --no-build-isolation "$(OBS_VLLM_GGUF_PLUGIN_DIR)"; \
+		fi; \
+		$(OBS_VLLM_EXPORT_CUDA_RUNTIME); \
+		"$(OBS_VLLM_PYTHON)" scripts/vllm_preflight.py \
+			--mode "$(OBS_VLLM_ENV_MODE)" --output "$(OBS_VLLM_ENV_MANIFEST)" \
+			--vllm-package "$(OBS_VLLM_PACKAGE)" --vllm-wheel "$(OBS_VLLM_WHEEL)" --torch-package "$(OBS_VLLM_TORCH_PACKAGE)" \
+			--torch-backend "$(OBS_VLLM_TORCH_BACKEND)" --expected-vllm-version "$(OBS_VLLM_EXPECTED_VERSION)" \
+			--expected-torch-version "$(OBS_VLLM_EXPECTED_TORCH_VERSION)" --expected-cuda-version "$(OBS_VLLM_EXPECTED_CUDA_VERSION)" \
+			--plugin-revision "$(OBS_VLLM_GGUF_PLUGIN_REVISION)" --plugin-state require; \
+	fi
+
+observe-vllm-preflight:
+	@test -x "$(OBS_VLLM_PYTHON)" || { echo 'Python do vLLM ausente; informe OBS_VLLM_PYTHON ou instale o runtime.' >&2; exit 1; }
+	$(OBS_VLLM_EXPORT_CUDA_RUNTIME)
+	$(OBS_VLLM_RUN_PREFLIGHT)
 
 observe-install-llama:
 	@command -v cmake >/dev/null || { echo 'cmake ausente; execute make observe-system-install.' >&2; exit 1; }
@@ -371,8 +419,12 @@ observe-render-runtime: observe-model-prepare
 	case "$(OBS_RUNTIME)" in \
 		vllm) \
 			runtime_version=$$("$(OBS_VLLM_PYTHON)" -c 'import importlib.metadata as m, torch; p=["vLLM "+m.version("vllm"), "torch "+m.version("torch"), "CUDA "+str(torch.version.cuda)]; p += ["vllm-gguf-plugin "+m.version("vllm-gguf-plugin")] if "$(OBS_MODEL_SOURCE)" in {"gguf","local-gguf"} else []; print(", ".join(p))'); \
-			runtime_version="$$runtime_version; executable_sha256=$$(sha256sum "$(OBS_VLLM_BIN)" | awk '{print $$1}')"; \
-			if test "$(OBS_MODEL_SOURCE)" = gguf || test "$(OBS_MODEL_SOURCE)" = local-gguf; then runtime_version="$$runtime_version; plugin_commit=$$(git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" rev-parse HEAD)"; fi ;; \
+			test -f "$(OBS_VLLM_ENV_MANIFEST)" || { echo 'Manifesto do preflight vLLM ausente.' >&2; exit 1; }; \
+			runtime_version="$$runtime_version; env_mode=$(OBS_VLLM_ENV_MODE); environment_sha256=$$(sha256sum "$(OBS_VLLM_ENV_MANIFEST)" | awk '{print $$1}'); executable_sha256=$$(sha256sum "$(OBS_VLLM_BIN)" | awk '{print $$1}')"; \
+			if test "$(OBS_MODEL_SOURCE)" = gguf || test "$(OBS_MODEL_SOURCE)" = local-gguf; then \
+				if test "$(OBS_VLLM_ENV_MODE)" = managed; then runtime_version="$$runtime_version; plugin_commit=$$(git -C "$(OBS_VLLM_GGUF_PLUGIN_DIR)" rev-parse HEAD)"; \
+				else runtime_version="$$runtime_version; plugin_source=preinstalled"; fi; \
+			fi ;; \
 		llama) runtime_version="llama.cpp $$(git -C "$(OBS_LLAMA_DIR)" rev-parse HEAD); binary_sha256=$$(sha256sum "$(OBS_LLAMA_BIN)" | awk '{print $$1}'); GGML_CUDA=ON; cuda_arch=$(OBS_CUDA_ARCH)" ;; \
 		ollama) runtime_version="Ollama $(OBS_OLLAMA_VERSION); binary_sha256=$$(sha256sum "$(OBS_OLLAMA_BIN)" | awk '{print $$1}')" ;; \
 	esac

@@ -16,6 +16,11 @@ if str(ROOT) not in sys.path:
 from prometheus_profile import plot_profile, profile_request
 from scripts.host_metrics_exporter import collect_metrics, read_vmstat
 from scripts.prometheus_stack import assert_port_available, render_config, wait_owned_url
+from scripts.vllm_preflight import (
+    cuda_version_from_directory,
+    minimum_driver_for_cuda,
+    validate_driver_compatibility,
+)
 
 
 class MockHandler(BaseHTTPRequestHandler):
@@ -191,6 +196,24 @@ class StackConfigTests(unittest.TestCase):
                 )
 
 
+class VllmPreflightTests(unittest.TestCase):
+    def test_cuda_package_directory_preserves_the_minor_version(self):
+        self.assertEqual(cuda_version_from_directory("cu13"), "13.0")
+        self.assertEqual(cuda_version_from_directory("cu129"), "12.9")
+
+    def test_cuda_family_has_an_explicit_minimum_driver(self):
+        self.assertEqual(minimum_driver_for_cuda("13.0"), (580, 65, 6))
+        self.assertEqual(minimum_driver_for_cuda("12.8"), (570, 26))
+        self.assertEqual(minimum_driver_for_cuda("12.9"), (575, 51, 3))
+
+    def test_cuda_13_rejects_driver_570_before_uva(self):
+        with self.assertRaisesRegex(RuntimeError, "driver NVIDIA incompatível"):
+            validate_driver_compatibility("570.211.01", ["13.0"])
+
+    def test_cuda_13_accepts_driver_580_family(self):
+        validate_driver_compatibility("580.159.04", ["13.0"])
+
+
 class ObservabilityMakeTests(unittest.TestCase):
     def make_dry_run(self, target: str, *variables: str) -> str:
         result = subprocess.run(
@@ -230,7 +253,10 @@ class ObservabilityMakeTests(unittest.TestCase):
         self.assertIn("prepare_observe_model.py prepare", output)
         self.assertIn("render_observe_runtime.py", output)
         self.assertIn("--runtime-version", output)
-        self.assertIn('uv pip install "vllm==0.29.0"', output)
+        self.assertIn("vllm-0.29.0-cp38-abi3-manylinux_2_28_x86_64.whl", output)
+        self.assertIn("09d48617fc2be9c6cdcd5db480651ab0", output)
+        self.assertIn('"torch==2.13.0" --torch-backend="cu130"', output)
+        self.assertIn("scripts/vllm_preflight.py", output)
         self.assertIn("HF_HUB_OFFLINE=1", output)
         self.assertIn("--prometheus-url", output)
         self.assertIn('--requests "2"', output)
@@ -240,6 +266,43 @@ class ObservabilityMakeTests(unittest.TestCase):
         output = self.make_dry_run("observe-install-vllm")
         self.assertIn("command -v ninja", output)
         self.assertIn("apt-get install -y ninja-build", output)
+
+    def test_driver_preflight_precedes_managed_download(self):
+        output = self.make_dry_run("observe-install-vllm")
+        self.assertLess(output.index("--driver-only"), output.index("uv pip install"))
+
+    def test_vllm_preflight_runs_uva_and_records_the_environment(self):
+        output = self.make_dry_run("observe-vllm-preflight")
+        self.assertIn("scripts/vllm_preflight.py", output)
+        self.assertIn('--mode "managed"', output)
+        self.assertIn('--expected-cuda-version "13.0"', output)
+        self.assertIn("vllm-environment.json", output)
+
+    def test_existing_vllm_mode_is_explicit_and_keeps_install_behind_guard(self):
+        output = self.make_dry_run(
+            "observe-install-vllm",
+            "OBS_VLLM_ENV_MODE=existing",
+            "OBS_VLLM_PYTHON=/app/.vllm_venv/bin/python",
+            "OBS_VLLM_BIN=/usr/local/bin/vllm",
+        )
+        self.assertIn('if test "existing" = managed; then', output)
+        self.assertIn("nenhuma instalação pip/uv será executada", output)
+        self.assertIn('--mode "existing"', output)
+
+    def test_preflight_precedes_plugin_model_and_prometheus(self):
+        output = self.make_dry_run(
+            "observe-bench",
+            "OBS_RUNTIME=vllm",
+            "OBS_MODEL_SOURCE=local-gguf",
+            "OBS_MODEL=/workspace/model.gguf",
+        )
+        preflight = output.index("scripts/vllm_preflight.py")
+        plugin_install = output.index("--no-build-isolation")
+        model_prepare = output.index("prepare_observe_model.py prepare")
+        prometheus_install = output.index("install_prometheus.py")
+        self.assertLess(preflight, plugin_install)
+        self.assertLess(preflight, model_prepare)
+        self.assertLess(preflight, prometheus_install)
 
     def test_vllm_uses_bundled_cuda_runtime_for_import_and_launch(self):
         install = self.make_dry_run("observe-install-vllm")

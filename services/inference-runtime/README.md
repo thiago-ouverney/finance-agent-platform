@@ -29,15 +29,59 @@ git clone https://github.com/thiago-ouverney/finance-agent-platform.git
 cd /workspace/finance-agent-platform/services/inference-runtime
 ```
 
-O preflight do vLLM exige o executável `ninja`: o FlashInfer pode compilar
-kernels CUDA no primeiro aquecimento. `make observe-system-install` instala e
-valida as dependências do sistema em imagens Ubuntu/Debian executadas como root.
+No modo `managed`, a instalação do vLLM exige `ninja`: o FlashInfer pode
+compilar kernels CUDA no primeiro aquecimento. `make observe-system-install`
+instala e valida as dependências do sistema em imagens Ubuntu/Debian executadas
+como root.
 
-Quando o wheel do vLLM instala `libcudart.so.13` no próprio venv, o fluxo
-`observe-*` detecta `site-packages/nvidia/cu13/lib` e o inclui no ambiente do
-servidor. Isso é independente do toolkit CUDA 12.x usado para compilar
-llama.cpp. Para um layout não padrão, use
+O ambiente gerenciado é um lock único, e não apenas uma versão solta do vLLM:
+o wheel x86-64 oficial de `vllm==0.29.0` por URL e SHA-256,
+`torch==2.13.0`, wheel PyTorch `cu130` (observado como `2.13.0+cu130`), CUDA
+13.0 e o commit do plugin GGUF declarado em
+`OBS_VLLM_GGUF_PLUGIN_REVISION`. O fluxo registra a identidade e as tags do
+wheel realmente instalado, versões observadas, driver, GPU, bibliotecas CUDA e
+resultado UVA em `observability/.state/headless/vllm-environment.json`.
+Em outra arquitetura, sobrescreva `OBS_VLLM_WHEEL` com o wheel e o fragmento
+`#sha256=` correspondentes.
+
+Quando o lock instala `libcudart.so.13` no venv, o modo `managed` detecta
+`site-packages/nvidia/cu13/lib` e o inclui no ambiente do servidor. No modo
+`existing`, o ambiente da imagem não é alterado. Para um layout não padrão,
+informe conscientemente
 `OBS_VLLM_CUDA_RUNTIME_LIB=/caminho/para/lib`.
+
+### Preflight rápido do vLLM
+
+Não baixe o modelo para descobrir no final que CUDA e driver são incompatíveis.
+Depois de instalar ou localizar um runtime, execute somente:
+
+```bash
+make observe-vllm-preflight
+```
+
+O alvo consulta o driver, detecta runtimes CUDA empacotados, importa PyTorch e
+vLLM e executa uma alocação pinned seguida de
+`get_accelerator_view_from_cpu_tensor` e `torch.cuda.synchronize()`. CUDA 13 é
+recusado antes do import em drivers anteriores a `580.65.06`; a chamada UVA é
+a validação final para incompatibilidades mais específicas. Na instalação
+`managed`, a checagem do driver também ocorre antes do download do wheel.
+
+Para reutilizar um runtime que já veio coerente na imagem, sem instalar nada
+sobre ele:
+
+```bash
+make observe-vllm-preflight \
+  OBS_VLLM_ENV_MODE=existing \
+  OBS_VLLM_PYTHON=/app/.vllm_venv/bin/python \
+  OBS_VLLM_BIN=/usr/local/bin/vllm
+```
+
+Se esse comando terminar com `VLLM PREFLIGHT OK`, use exatamente as mesmas
+três variáveis no `observe-bench`. Para GGUF, o modo `existing` também exige que
+`vllm_gguf_plugin` já esteja instalado no Python informado; ele apenas valida o
+plugin e nunca chama `pip` ou `uv`. Caminhos variam entre imagens, portanto
+confirme-os com `command -v vllm` e inspecione o wrapper antes de preencher as
+variáveis.
 
 O repositório é público, portanto HTTPS é o caminho mais simples para clonar no Pod e não exige chave SSH. O `hf` é instalado dentro do venv pelo `make install-benchmark`; não é necessário instalar um `hf` separado no sistema. Depois da instalação, verifique com `./.venv/bin/hf --help` ou deixe o Make chamá-lo automaticamente.
 
