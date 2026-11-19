@@ -88,6 +88,14 @@ make observe-prometheus-start OBS_RUNTIME=vllm
 make observe-status OBS_RUNTIME=vllm
 ```
 
+O perfil interativo usa, por padrão, intervalo de 100 ms e timeout de 90 ms no
+job de host/GPU para aumentar a chance de haver uma amostra durante TTFTs
+curtos. O endpoint `/metrics` do runtime permanece em 500/450 ms, evitando
+consultar o vLLM dez vezes por segundo. Isso não altera o `observe-bench`, que
+permanece integralmente em 500 ms. Cada scrape do host executa `nvidia-smi`;
+portanto, essa resolução é destinada a diagnóstico exploratório, não a
+substituir a bateria comparativa.
+
 Terminal 3 — notebook:
 
 ```bash
@@ -97,6 +105,34 @@ make observe-jupyter OBS_RUNTIME=vllm OBS_JUPYTER_PORT=8889
 
 Copie a URL com token exibida pelo Jupyter. O alvo já usa `--allow-root` e não
 publica a porta para a internet.
+
+### Pod com runtime e Jupyter já ativos
+
+Depois de sincronizar esta revisão no checkout do Pod, mantenha runtime e
+Jupyter em execução e reinicie somente a coleta:
+
+```bash
+cd /workspace/finance-agent-platform/services/inference-runtime
+make observe-prometheus-stop
+make observe-prometheus-start OBS_RUNTIME=vllm
+sleep 1
+make observe-status OBS_RUNTIME=vllm
+grep -E 'scrape_(interval|timeout)' observability/.state/prometheus.yml
+```
+
+O resultado esperado do último comando contém 500/450 ms no bloco global e
+100/90 ms no job `inference-host`. Se o exporter não conseguir responder de
+forma estável nesse prazo, use o fallback:
+
+```bash
+make observe-prometheus-stop
+make observe-prometheus-start OBS_RUNTIME=vllm \
+  OBS_PROFILE_SCRAPE_INTERVAL=200ms \
+  OBS_PROFILE_SCRAPE_TIMEOUT=180ms
+```
+
+Nesse caso, defina também `PROMETHEUS_STEP = '200ms'` no notebook. Não inicie
+uma segunda pilha antes de encerrar a primeira.
 
 ## 4. Abra o notebook pela máquina local
 
@@ -117,11 +153,28 @@ Abra `analytics/notebooks/profile_runtime_with_prometheus.ipynb` e execute as
 células em ordem:
 
 1. carregue as funções do projeto;
-2. ajuste `MAX_TOKENS` e `PROMPT`;
+2. ajuste `MAX_TOKENS`, `PROMPT` e confirme que `PROMETHEUS_STEP` corresponde
+   ao intervalo da coleta;
 3. valide as APIs do runtime e do Prometheus;
 4. envie uma requisição sequencial;
 5. examine a resposta, a tabela e os cinco painéis;
 6. salve os artefatos da execução.
+
+O notebook usa `PROMETHEUS_STEP='100ms'`, adiciona um identificador no início
+do prompt para impedir reaproveitamento de prefixo entre repetições e expõe
+`PREFILL_PROMPT_REPETITIONS`. Mantenha o multiplicador em `1` para medir a
+carga real. Se o TTFT continuar menor que uma janela de coleta, use `2` ou mais
+somente como diagnóstico e confira `prompt_tokens + MAX_TOKENS < OBS_CONTEXT`.
+Esse ensaio responde se a GPU aparece durante um prefill mais longo; ele não é
+comparável à carga original.
+
+Em um Jupyter que já estava aberto quando os arquivos foram atualizados, salve
+o conteúdo próprio da célula do BMC, recarregue o notebook do disco, reinicie o
+kernel e execute as células desde o início. Alternativamente, na sessão atual,
+defina `PROMETHEUS_STEP = '100ms'` e passe
+`prometheus_step=PROMETHEUS_STEP` para `profile_request`. Reiniciar o kernel é
+necessário para importar a versão nova de `prometheus_profile.py` sem manter o
+módulo antigo em memória.
 
 O gráfico marca os seguintes eventos:
 
@@ -144,8 +197,15 @@ Relacione os eventos com os recursos:
 - aumento de RAM, disco, swap ou major page faults indica pressão de memória;
 - crescimento do pool KV mostra ocupação do cache, não percentual de VRAM.
 
-Uma amostragem de 500 ms pode não capturar um prefill muito curto. Para tornar
-essa fase visível, aumente o prompt sem exceder `OBS_CONTEXT`.
+Mesmo uma amostragem de 100 ms pode não capturar um prefill de aproximadamente
+76 ms: o ganho é probabilístico, e `nvidia-smi` agrega utilização em sua própria
+janela. Além disso, `query_range` posiciona o último valor disponível na grade
+da consulta; a incerteza temporal permanece da ordem de um scrape. Um ponto na
+faixa do TTFT é correlação, não prova de qual kernel o produziu. Repita algumas
+vezes com identificadores de prompt distintos. Para tornar a fase mais visível,
+aumente o prompt sem exceder `OBS_CONTEXT`. Use Nsight/DCGM numa execução
+separada quando precisar de uma linha do tempo de kernels, não apenas de
+correlação por amostras.
 
 ## 6. Preserve e baixe os resultados
 
@@ -202,6 +262,8 @@ OBS_VLLM_DTYPE
 OBS_VLLM_GPU_MEMORY_UTILIZATION
 OBS_VLLM_PACKAGE
 OBS_VLLM_EXTRA_ARGS
+OBS_PROFILE_SCRAPE_INTERVAL
+OBS_PROFILE_SCRAPE_TIMEOUT
 ```
 
 Antes de iniciar, use `make observe-config ...` para registrar a configuração
@@ -251,6 +313,10 @@ Encerre runtime e Jupyter com `Ctrl-C` nos terminais correspondentes.
   consulte `observability/.state/{prometheus,exporter}.log`.
 - **GPU ou VRAM ausentes:** valide `nvidia-smi` e
   `curl -s http://127.0.0.1:9108/metrics | grep inference_gpu`.
+- **Scrapes de 100 ms instáveis:** consulte no Prometheus
+  `up{job="inference-host"}` e
+  `scrape_duration_seconds{job="inference-host"}`. Se `up` não permanecer em
+  `1` ou a duração se aproximar de 90 ms, reinicie a coleta com 200/180 ms.
 - **Painel KV vazio em llama.cpp ou Ollama:** esperado; o perfil atual só
   consulta a métrica de pool KV exposta pelo vLLM.
 - **PCIe ausente:** o exporter atual não mede tráfego PCIe. Use Nsight/DCGM em

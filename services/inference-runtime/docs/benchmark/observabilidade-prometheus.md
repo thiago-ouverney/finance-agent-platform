@@ -137,12 +137,30 @@ ausente.
 | TTFT e tokens/s | cliente SSE | medição externa ao runtime |
 | tráfego PCIe | não coletado | exige DCGM, Nsight ou instrumentação equivalente |
 
-O intervalo de scrape é de aproximadamente 500 ms. Fases mais curtas podem não
-receber amostra. Uma métrica não exposta fica ausente/`null`; ausência nunca é
-convertida em zero. Em particular, llama.cpp e Ollama não fornecem ao fluxo
-atual a série `vllm:kv_cache_usage_perc`. Prometheus, exporter e consultas a
-`nvidia-smi` também têm overhead; mantenha a mesma instrumentação em todas as
-rodadas comparadas.
+O benchmark headless usa intervalo de scrape de aproximadamente 500 ms. No
+perfil interativo, somente o job de host/GPU usa 100/90 ms por padrão; o job do
+runtime permanece em 500/450 ms. O perfil aceita
+`OBS_PROFILE_SCRAPE_INTERVAL` e `OBS_PROFILE_SCRAPE_TIMEOUT`. Fases menores que
+o intervalo ainda podem não receber amostra; além disso, `nvidia-smi` agrega
+utilização numa janela interna, então 100 ms aumenta a chance de correlação,
+mas não oferece precisão de kernel.
+
+A consulta temporal usa uma grade de avaliação. Um seletor instantâneo pode
+repetir nessa grade a última amostra disponível, de modo que a posição visual
+tem incerteza da ordem de um scrape. Uma amostra desenhada dentro de TTFT ou
+decode indica correlação temporal aproximada, não atribuição de um kernel à
+fase.
+
+Cada scrape do host executa `nvidia-smi`. Frequências altas podem aumentar o
+overhead ou exceder o timeout; nesse caso, o perfil deve usar 200/180 ms. Uma
+métrica de sucesso igual a zero também pode indicar que o scrape anterior de
+GPU ainda estava ativo; o exporter recusa consultas sobrepostas para não criar
+uma tempestade de subprocessos. Uma
+métrica não exposta fica ausente/`null`; ausência nunca é convertida em zero.
+Em particular, llama.cpp e Ollama não fornecem ao fluxo atual a série
+`vllm:kv_cache_usage_perc`. Prometheus, exporter e consultas a `nvidia-smi`
+também têm overhead; mantenha a mesma instrumentação em todas as rodadas
+comparadas.
 
 A exportação consulta a janela ao fim da rodada. A duração total precisa caber
 em `PROMETHEUS_RETENTION` (6 h por padrão); aumente esse valor antes de uma
@@ -231,6 +249,13 @@ make observe-serve OBS_RUNTIME=vllm
 make observe-prometheus-start OBS_RUNTIME=vllm
 make observe-jupyter OBS_RUNTIME=vllm
 ```
+
+`observe-prometheus-start` aplica 100/90 ms ao job de host/GPU somente no perfil
+interativo, mantém o runtime em 500/450 ms e `observe-jupyter` entrega o passo
+de 100 ms ao notebook. Um Pod já ativo exige reiniciar apenas a pilha
+Prometheus/exporter para trocar o intervalo; runtime e Jupyter podem permanecer
+em execução. Um kernel já carregado deve ser reiniciado, ou o módulo deve ser
+recarregado explicitamente, após atualizar o código.
 
 Nesse modo, navegador local acessa Jupyter por SSH, mas o kernel, a inferência e
 a coleta ficam no Pod. A persistência manual gera `profile.json`,

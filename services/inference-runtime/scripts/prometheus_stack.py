@@ -19,8 +19,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def render_config(exporter_target: str, interval: str, runtime_target: str | None = None,
-                  runtime_metrics_path: str = "/metrics", timeout: str = "450ms") -> str:
+                  runtime_metrics_path: str = "/metrics", timeout: str = "450ms",
+                  runtime_interval: str | None = None,
+                  runtime_timeout: str | None = None) -> str:
+    runtime_interval = runtime_interval or interval
+    runtime_timeout = runtime_timeout or timeout
     jobs = [f'''  - job_name: inference-host
+    scrape_interval: {interval}
+    scrape_timeout: {timeout}
     static_configs:
       - targets: ["{exporter_target}"]
 ''']
@@ -31,9 +37,9 @@ def render_config(exporter_target: str, interval: str, runtime_target: str | Non
       - targets: ["{runtime_target}"]
 ''')
     return f'''global:
-  scrape_interval: {interval}
-  scrape_timeout: {timeout}
-  evaluation_interval: {interval}
+  scrape_interval: {runtime_interval}
+  scrape_timeout: {runtime_timeout}
+  evaluation_interval: {runtime_interval}
 
 scrape_configs:
 {''.join(jobs)}'''
@@ -183,6 +189,7 @@ def start(args) -> None:
     config.write_text(render_config(
         f"{args.exporter_host}:{args.exporter_port}", args.scrape_interval,
         args.runtime_metrics_target, args.runtime_metrics_path, args.scrape_timeout,
+        args.runtime_scrape_interval, args.runtime_scrape_timeout,
     ), encoding="utf-8")
     exporter = launch([
         str(args.python), str(ROOT / "scripts" / "host_metrics_exporter.py"),
@@ -215,6 +222,9 @@ def start(args) -> None:
         "exporter_url": f"http://{args.exporter_host}:{args.exporter_port}/metrics",
         "runtime_metrics_target": args.runtime_metrics_target,
         "scrape_interval": args.scrape_interval,
+        "scrape_timeout": args.scrape_timeout,
+        "runtime_scrape_interval": args.runtime_scrape_interval or args.scrape_interval,
+        "runtime_scrape_timeout": args.runtime_scrape_timeout or args.scrape_timeout,
     }
     (state / "stack.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(metadata, indent=2))
@@ -257,6 +267,8 @@ def parser() -> argparse.ArgumentParser:
     start_parser.add_argument("--nvidia-smi", default="nvidia-smi")
     start_parser.add_argument("--scrape-interval", default="1s")
     start_parser.add_argument("--scrape-timeout", default="450ms")
+    start_parser.add_argument("--runtime-scrape-interval")
+    start_parser.add_argument("--runtime-scrape-timeout")
     start_parser.add_argument("--retention", default="6h")
     start_parser.add_argument("--runtime-metrics-target")
     start_parser.add_argument("--runtime-metrics-path", default="/metrics")

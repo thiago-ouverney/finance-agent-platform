@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from prometheus_profile import plot_profile, profile_request
-from scripts.host_metrics_exporter import collect_metrics, read_vmstat
+from scripts.host_metrics_exporter import GPU_QUERY_LOCK, collect_metrics, query_gpus, read_vmstat
 from scripts.prometheus_stack import assert_port_available, render_config, wait_owned_url
 from scripts.vllm_preflight import (
     cuda_version_from_directory,
@@ -27,6 +27,7 @@ from scripts.vllm_preflight import (
 
 class MockHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    last_query_range = None
 
     def log_message(self, *_args):
         return
@@ -49,6 +50,7 @@ class MockHandler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/api/v1/query_range"):
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            type(self).last_query_range = query
             start = float(query["start"][0])
             end = float(query["end"][0])
             self.send_payload({
@@ -100,13 +102,21 @@ class PrometheusProfileTests(unittest.TestCase):
             max_tokens=4,
             margin_before_seconds=0,
             margin_after_seconds=0,
+            prometheus_step="100ms",
         )
         self.assertEqual(result["request"]["completion_tokens"], 2)
         self.assertEqual(result["request"]["output"], "Resposta sequencial")
         self.assertEqual([event["name"] for event in result["events"]],
                          ["request_start", "first_token", "last_content", "request_end"])
+        request = result["request"]
+        events = {event["name"]: event["timestamp"] for event in result["events"]}
+        self.assertEqual(events["request_start"], request["request_start_epoch_s"])
+        self.assertEqual(events["first_token"], request["first_content_epoch_s"])
+        self.assertEqual(events["last_content"], request["last_content_epoch_s"])
+        self.assertEqual(events["request_end"], request["request_end_epoch_s"])
         self.assertEqual({row["metric"] for row in result["telemetry"]},
                          {"inference_host_cpu_utilization_ratio"})
+        self.assertEqual(MockHandler.last_query_range["step"], ["100ms"])
         self.assertGreaterEqual(result["events"][-1]["elapsed_seconds"],
                                 result["events"][1]["elapsed_seconds"])
 
@@ -128,6 +138,27 @@ class PrometheusProfileTests(unittest.TestCase):
         figure = plot_profile(profile)
         self.assertEqual(len(figure.axes), 5)
 
+    def test_plot_reports_the_host_query_resolution(self):
+        profile = {
+            "metadata": {
+                "model": "mock-model",
+                "telemetry_window": {"step": "100ms"},
+            },
+            "request": {
+                "time_to_first_token_ms": 75,
+                "decode_tokens_per_second": 60,
+            },
+            "events": [
+                {"name": "request_start", "timestamp": 10.0, "elapsed_seconds": 0.0},
+                {"name": "first_token", "timestamp": 10.075, "elapsed_seconds": 0.075},
+                {"name": "last_content", "timestamp": 11.0, "elapsed_seconds": 1.0},
+                {"name": "request_end", "timestamp": 11.1, "elapsed_seconds": 1.1},
+            ],
+            "telemetry": [],
+        }
+        figure = plot_profile(profile)
+        self.assertIn("host step=100ms", figure._suptitle.get_text())
+
 
 class HostExporterTests(unittest.TestCase):
     def test_vmstat_and_missing_gpu_are_explicit(self):
@@ -141,6 +172,15 @@ class HostExporterTests(unittest.TestCase):
         self.assertIn("inference_host_swap_used_bytes", payload)
         self.assertIn("inference_gpu_scrape_success 0.0", payload)
 
+    def test_overlapping_gpu_query_is_rejected_without_spawning_nvidia_smi(self):
+        with mock.patch("scripts.host_metrics_exporter.subprocess.run") as run:
+            self.assertTrue(GPU_QUERY_LOCK.acquire(blocking=False))
+            try:
+                self.assertEqual(query_gpus(), (False, []))
+            finally:
+                GPU_QUERY_LOCK.release()
+        run.assert_not_called()
+
 
 class StackConfigTests(unittest.TestCase):
     def test_runtime_target_is_optional(self):
@@ -151,6 +191,17 @@ class StackConfigTests(unittest.TestCase):
         with_runtime = render_config("127.0.0.1:9108", "500ms", "127.0.0.1:8000")
         self.assertIn("inference-runtime", with_runtime)
         self.assertIn('targets: ["127.0.0.1:8000"]', with_runtime)
+
+    def test_high_resolution_profile_config_uses_a_shorter_timeout(self):
+        config = render_config(
+            "127.0.0.1:9108", "100ms", "127.0.0.1:8000", timeout="90ms",
+            runtime_interval="500ms", runtime_timeout="450ms",
+        )
+        self.assertIn("global:\n  scrape_interval: 500ms\n  scrape_timeout: 450ms", config)
+        self.assertIn(
+            "job_name: inference-host\n    scrape_interval: 100ms\n    scrape_timeout: 90ms",
+            config,
+        )
 
     def test_port_preflight_rejects_an_existing_service(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), MockHandler)
@@ -252,6 +303,23 @@ class ObservabilityMakeTests(unittest.TestCase):
     def test_vllm_prometheus_includes_runtime_metrics(self):
         output = self.make_dry_run("observe-prometheus-start", "OBS_RUNTIME=vllm")
         self.assertIn('PROMETHEUS_RUNTIME_TARGET="127.0.0.1:8000"', output)
+        self.assertIn('PROMETHEUS_SCRAPE_INTERVAL="100ms"', output)
+        self.assertIn('PROMETHEUS_SCRAPE_TIMEOUT="90ms"', output)
+        self.assertIn('PROMETHEUS_RUNTIME_SCRAPE_INTERVAL="500ms"', output)
+        self.assertIn('PROMETHEUS_RUNTIME_SCRAPE_TIMEOUT="450ms"', output)
+
+    def test_interactive_jupyter_receives_the_profile_query_step(self):
+        output = self.make_dry_run("observe-jupyter", "OBS_RUNTIME=vllm")
+        self.assertIn('PROMETHEUS_STEP="100ms"', output)
+
+    def test_headless_bench_keeps_the_comparison_scrape_interval(self):
+        output = self.make_dry_run(
+            "observe-bench",
+            "OBS_RUNTIME=vllm",
+            "OBS_MODEL_SOURCE=hf",
+            "OBS_MODEL=Qwen/Qwen2.5-7B-Instruct",
+        )
+        self.assertIn('--scrape-interval "500ms"', output)
 
     def test_headless_bench_prepares_then_runs_offline_with_prometheus(self):
         output = self.make_dry_run(

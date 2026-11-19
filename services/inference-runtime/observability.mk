@@ -154,6 +154,11 @@ export OBS_VLLM_EXTRA_ARGS OBS_LLAMA_EXTRA_ARGS OBS_OLLAMA_EXTRA_ARGS
 
 OBS_JUPYTER_PORT ?= 8889
 OBS_PROMETHEUS_URL ?= http://127.0.0.1:9090
+# O perfil interativo privilegia resolução para observar TTFTs curtos. A bateria
+# headless continua usando PROMETHEUS_SCRAPE_INTERVAL=500ms para preservar o
+# contrato comparativo e limitar o overhead do nvidia-smi.
+OBS_PROFILE_SCRAPE_INTERVAL ?= 100ms
+OBS_PROFILE_SCRAPE_TIMEOUT ?= 90ms
 OBS_RUNTIME_PORT = $(if $(filter vllm,$(OBS_RUNTIME)),$(OBS_VLLM_PORT),$(if $(filter llama,$(OBS_RUNTIME)),$(OBS_LLAMA_PORT),$(if $(filter ollama,$(OBS_RUNTIME)),$(OBS_OLLAMA_PORT),)))
 OBS_BASE_URL = http://$(OBS_HOST):$(OBS_RUNTIME_PORT)
 OBS_RUNTIME_BIN = $(if $(filter vllm,$(OBS_RUNTIME)),$(OBS_VLLM_BIN),$(if $(filter llama,$(OBS_RUNTIME)),$(OBS_LLAMA_BIN),$(OBS_OLLAMA_BIN)))
@@ -191,6 +196,7 @@ observe-help:
 		'  make observe-bootstrap OBS_RUNTIME=ollama' \
 		'' \
 		'Variáveis principais: OBS_RUNTIME, OBS_CONTEXT, OBS_MODEL_ALIAS, OBS_JUPYTER_PORT,' \
+		'OBS_PROFILE_SCRAPE_INTERVAL, OBS_PROFILE_SCRAPE_TIMEOUT,' \
 		'OBS_VLLM_MODEL, OBS_VLLM_FORMAT=hf|gguf, OBS_VLLM_ENV_MODE=managed|existing,' \
 		'OBS_VLLM_WHEEL, OBS_VLLM_TORCH_PACKAGE, OBS_VLLM_TORCH_BACKEND, OBS_VLLM_CUDA_HOME,' \
 		'OBS_VLLM_CUDA_TOOLKIT_PACKAGE, OBS_VLLM_AUTO_INSTALL_CUDA_TOOLKIT, OBS_VLLM_GPU_MEMORY_UTILIZATION,' \
@@ -215,6 +221,8 @@ observe-config: observe-check-runtime
 		"vllm_model=$(OBS_VLLM_MODEL)" \
 		"gguf_model=$(OBS_GGUF_MODEL)" \
 		"prometheus=$(OBS_PROMETHEUS_URL)" \
+		"profile_scrape_interval=$(OBS_PROFILE_SCRAPE_INTERVAL)" \
+		"profile_scrape_timeout=$(OBS_PROFILE_SCRAPE_TIMEOUT)" \
 		"jupyter_port=$(OBS_JUPYTER_PORT)"
 
 observe-check-runtime:
@@ -409,9 +417,16 @@ observe-serve-ollama:
 
 observe-prometheus-start: observe-check-runtime
 	@if test "$(OBS_RUNTIME)" = vllm; then \
-		$(MAKE) --no-print-directory prometheus-start PROMETHEUS_RUNTIME_TARGET="$(OBS_HOST):$(OBS_VLLM_PORT)"; \
+		$(MAKE) --no-print-directory prometheus-start \
+			PROMETHEUS_RUNTIME_TARGET="$(OBS_HOST):$(OBS_VLLM_PORT)" \
+			PROMETHEUS_SCRAPE_INTERVAL="$(OBS_PROFILE_SCRAPE_INTERVAL)" \
+			PROMETHEUS_SCRAPE_TIMEOUT="$(OBS_PROFILE_SCRAPE_TIMEOUT)" \
+			PROMETHEUS_RUNTIME_SCRAPE_INTERVAL="$(PROMETHEUS_SCRAPE_INTERVAL)" \
+			PROMETHEUS_RUNTIME_SCRAPE_TIMEOUT="$(PROMETHEUS_SCRAPE_TIMEOUT)"; \
 	else \
-		$(MAKE) --no-print-directory prometheus-start; \
+		$(MAKE) --no-print-directory prometheus-start \
+			PROMETHEUS_SCRAPE_INTERVAL="$(OBS_PROFILE_SCRAPE_INTERVAL)" \
+			PROMETHEUS_SCRAPE_TIMEOUT="$(OBS_PROFILE_SCRAPE_TIMEOUT)"; \
 	fi
 
 observe-prometheus-stop:
@@ -428,7 +443,7 @@ observe-notebook-install:
 observe-jupyter: observe-check-runtime
 	@test -x "$(CURDIR)/../../analytics/.venv/bin/jupyter" || { echo 'Notebook ausente; execute make observe-notebook-install.' >&2; exit 1; }
 	INFERENCE_BASE_URL="$(OBS_BASE_URL)" INFERENCE_MODEL="$(OBS_MODEL_ALIAS)" \
-	PROMETHEUS_URL="$(OBS_PROMETHEUS_URL)" \
+	PROMETHEUS_URL="$(OBS_PROMETHEUS_URL)" PROMETHEUS_STEP="$(OBS_PROFILE_SCRAPE_INTERVAL)" \
 		exec "$(CURDIR)/../../analytics/.venv/bin/jupyter" lab \
 		"$(CURDIR)/../../analytics/notebooks/profile_runtime_with_prometheus.ipynb" \
 		--no-browser --ip 127.0.0.1 --port "$(OBS_JUPYTER_PORT)" --port-retries 0 --allow-root

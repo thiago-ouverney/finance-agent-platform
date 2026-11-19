@@ -81,17 +81,25 @@ def profile_request(*, base_url: str, model: str, messages: list[dict],
         raise RuntimeError(f"Prometheus indisponível em {prometheus_url}")
 
     cfg = {"base_url": base_url.rstrip("/"), "model": model}
-    started_epoch = time.time()
+    measurement_started_epoch = time.time()
     request = stream_messages_request(cfg, messages, timeout, api_key, max_tokens=max_tokens)
-    request_end_epoch = started_epoch + request["end_to_end_latency_seconds"]
-    first_epoch = (
-        started_epoch + request["time_to_first_token_seconds"]
-        if request.get("time_to_first_token_seconds") is not None else None
+    # O cliente SSE já mede os quatro eventos com o mesmo relógio monotônico e
+    # os converte para epoch. Usar esses valores evita deslocar uma fase curta
+    # (como um TTFT de dezenas de ms) pelo overhead entre as duas funções.
+    started_epoch = request.get("request_start_epoch_s", measurement_started_epoch)
+    request_end_epoch = request.get(
+        "request_end_epoch_s", started_epoch + request["end_to_end_latency_seconds"],
     )
-    last_content_epoch = (
-        first_epoch + request["generation_time_seconds"]
-        if first_epoch is not None and request.get("generation_time_seconds") is not None else None
-    )
+    first_epoch = request.get("first_content_epoch_s")
+    if first_epoch is None and request.get("time_to_first_token_seconds") is not None:
+        first_epoch = started_epoch + request["time_to_first_token_seconds"]
+    last_content_epoch = request.get("last_content_epoch_s")
+    if (
+        last_content_epoch is None
+        and first_epoch is not None
+        and request.get("generation_time_seconds") is not None
+    ):
+        last_content_epoch = first_epoch + request["generation_time_seconds"]
     query_start = started_epoch - max(0, margin_before_seconds)
     query_end = request_end_epoch + max(0, margin_after_seconds)
     remaining = query_end - time.time() + 0.2
@@ -214,7 +222,13 @@ def plot_profile(profile: dict):
     for metric, label, scale in specs:
         rows = frame[frame.get("metric") == metric] if not frame.empty else frame
         for key, part in _series(rows):
-            axes[0].plot(part["elapsed_seconds"], part["value"] * scale, marker="o", label=label + key)
+            # Utilização é uma amostra discreta, não uma medição contínua entre
+            # dois scrapes. Pontos evitam sugerir atividade inexistente antes ou
+            # depois das fronteiras observadas da requisição.
+            axes[0].plot(
+                part["elapsed_seconds"], part["value"] * scale,
+                marker="o", linestyle="none", label=label + key,
+            )
     axes[0].set_ylabel("Utilização (%)")
 
     memory_specs = [
@@ -276,9 +290,11 @@ def plot_profile(profile: dict):
         if handles:
             unique = dict(zip(labels, handles))
             axis.legend(unique.values(), unique.keys(), loc="upper right", fontsize=8)
+    prometheus_step = profile.get("metadata", {}).get("telemetry_window", {}).get("step")
+    resolution = f" | host step={prometheus_step}" if prometheus_step is not None else ""
     fig.suptitle(
         f"{profile['metadata']['model']} | TTFT={profile['request'].get('time_to_first_token_ms')} ms | "
-        f"decode={profile['request'].get('decode_tokens_per_second')} tok/s"
+        f"decode={profile['request'].get('decode_tokens_per_second')} tok/s{resolution}"
     )
     fig.tight_layout()
     return fig

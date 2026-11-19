@@ -6,10 +6,14 @@ import argparse
 import csv
 import math
 import subprocess
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import psutil
+
+
+GPU_QUERY_LOCK = threading.Lock()
 
 
 def finite_number(value):
@@ -47,15 +51,23 @@ def read_vmstat(path: str | Path = "/proc/vmstat") -> dict[str, int]:
 
 
 def query_gpus(binary: str = "nvidia-smi") -> tuple[bool, list[list[str]]]:
+    # Em perfis de alta resolução, um scrape pode expirar no Prometheus antes
+    # de o subprocesso terminar. Não permita uma tempestade de nvidia-smi em
+    # threads sobrepostas; o scrape concorrente registra sucesso=0 e retorna.
+    if not GPU_QUERY_LOCK.acquire(blocking=False):
+        return False, []
     command = [
         binary,
         "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,utilization.memory,temperature.gpu,power.draw",
         "--format=csv,noheader,nounits",
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return False, []
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return False, []
+    finally:
+        GPU_QUERY_LOCK.release()
     if result.returncode != 0:
         return False, []
     return True, list(csv.reader(result.stdout.splitlines(), skipinitialspace=True))
