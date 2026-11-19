@@ -1,0 +1,39 @@
+name: Repository checks
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate repository governance
+        run: make test-governance
+
+  whatsapp-adapter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/whatsapp-adapter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: apps/whatsapp-adapter/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint, build and test
+        run: npm run verify
+

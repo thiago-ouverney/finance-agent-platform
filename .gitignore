@@ -24,6 +24,12 @@ results/
 results-from-*/
 .venv-analytics/
 
+# Local presentation and Codex rendering outputs
+artifacts/
+.chart-data-*/
+.codex-deck-*/
+.codex-finalizer/
+
 # Local/editor files
 .DS_Store
 .idea/

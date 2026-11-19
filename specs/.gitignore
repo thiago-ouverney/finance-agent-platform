@@ -1,0 +1,14 @@
+# Packs de execução são locais por padrão; decisões duráveis pertencem a spec.md.
+/*/implementation-plan.md
+/*/tasks.md
+/*/test-plan.md
+/*/acceptance.md
+/*/decisions.md
+
+# O template completo é versionado.
+!/_template/implementation-plan.md
+!/_template/tasks.md
+!/_template/test-plan.md
+!/_template/acceptance.md
+!/_template/decisions.md
+

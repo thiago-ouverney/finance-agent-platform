@@ -1,32 +1,50 @@
-# Instruções para agentes neste projeto
+# Instruções do runtime de inferência
 
-## Avaliação obrigatória antes de executar
+Este guia complementa o [`AGENTS.md` raiz](../../AGENTS.md).
 
-Antes de cada ação ou bloco de execução, avaliar se o trabalho deve ser feito pelo agente principal ou delegado. Considerar independência da tarefa, dificuldade, risco, custo de repassar contexto e possibilidade de progresso paralelo útil. Não delegar automaticamente só porque há uma ferramenta de agentes disponível.
+## Papel e fronteira
 
-O usuário solicita e autoriza subagentes com modelos menores para implementações delimitadas, testes, HTML, documentação, formatação e verificações mecânicas. Preferir o menor modelo disponível capaz de cumprir a tarefa com qualidade; não depender de um nome de modelo que pode não existir em outra sessão.
+O runtime inicia e compara Ollama, llama.cpp e vLLM, coleta observabilidade e
+produz resultados de benchmark. Analytics consome os artefatos; o runtime não
+deve implementar uma segunda camada de avaliação MOPEP nem conhecer contatos ou
+regras do WhatsApp.
 
-O agente principal concentra decisões arquiteturais e metodológicas, definição de contratos, diagnóstico complexo, revisão, integração e validação final. Pode executar diretamente ações curtas, sequenciais ou de alto acoplamento quando delegar acrescentaria custo sem benefício.
+A metodologia é definida em
+[`docs/benchmark/metodologia.md`](docs/benchmark/metodologia.md); o layout e os
+comandos atuais estão no [`README.md`](README.md).
 
-Comunicar a divisão de trabalho de forma breve quando relevante; não emitir um monólogo de raciocínio ou uma mensagem antes de cada comando trivial. Registrar decisões de trabalho e seus motivos em resumo, não raciocínio interno detalhado.
+## Limites
 
-## Contrato de delegação
+- O benchmark oficial executa uma requisição por vez. Concorrência é outro
+  experimento e exige spec e workload próprios.
+- Pesos já devem estar no SSD; download, setup e preparação invalidam a janela
+  medida quando ocorrem durante ela.
+- Meça inicialização, primeira resposta, warmup e operação posterior
+  separadamente.
+- Diferencie TTFT, tokens/s de decode e tokens/s efetivos e documente fórmulas.
+- Diferencie tokens de contexto, KV lógico estimado, ocupação observada do pool
+  KV e memória total; proxy não é medição física.
+- Dados ausentes não são zero e execução parcial não é sucesso. Cada runtime
+  mantém conclusão própria até que identidade e requests sejam comparáveis.
+- Pesos, ambientes, resultados, logs, tokens e chaves permanecem locais. Não
+  publique branch, artefato ou resultado sem autorização explícita.
 
-- Dar ao subagente uma tarefa concreta, contexto mínimo suficiente, arquivos sob responsabilidade, resultado esperado e critérios de aceite.
-- Evitar dois agentes editando os mesmos arquivos. Reutilizar agentes quando adequado.
-- Enquanto um subagente trabalha, avançar em trabalho independente útil.
-- Revisar o resultado e executar validações pertinentes antes de afirmar conclusão; delegação não transfere responsabilidade pela correção.
-- Se não houver modelos menores ou ferramenta de delegação, informar a limitação e continuar localmente, sem fingir uso de subagentes.
+## Antes de alterar
 
-## Regras do benchmark
+Fixe modelo/artefato e hash, tokenizer, hardware, runtime, workload, temperatura,
+limite de saída e concorrência. Identifique se a mudança afeta lifecycle,
+protocolo de requests, schema de resultado, observabilidade ou análise
+downstream; comunique o contrato antes de alterar consumidores.
 
-- Uma requisição de inferência por vez; concorrência é outro trabalho.
-- Pesos já disponíveis no SSD. Downloads são preparação e invalidam a execução medida se ocorrerem durante ela.
-- Medir inicialização, primeira resposta, aquecimento e operação posterior separadamente.
-- Distinguir TTFT, tokens/s de geração e tokens/s efetivos; documentar as fórmulas.
-- Distinguir contexto em tokens, KV lógico estimado, ocupação real do pool KV e memória total da GPU. Não apresentar proxies como medição física.
-- Nunca apresentar dados ausentes como zero nem uma execução parcial como sucesso.
-- Não publicar pesos, ambientes, resultados, logs ou credenciais. Revisar os arquivos antes de qualquer push autorizado; usar autoria noreply e preservar a branch de histórico privado sem publicá-la.
-- Mudanças no código devem atualizar documentação Markdown e testes proporcionais ao risco.
+## Evidência
 
-Estas instruções têm escopo do projeto. Não alteram configurações globais, permissões de ferramentas ou instruções de maior prioridade.
+Com o ambiente preparado, execute:
+
+```bash
+make test-inference
+```
+
+Mudanças no runtime também atualizam testes e documentação Markdown
+proporcionais ao risco. Para campanhas, preserve manifests, requests pareadas,
+timestamps, completude e falhas; o handoff distingue smoke, perfil exploratório
+e benchmark formal e registra verificações remotas não executadas.

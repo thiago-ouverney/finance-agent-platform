@@ -54,10 +54,11 @@ QUANTIZATION_DIR ?= pipelines/qwen-quantization
 LOCAL_GOLDEN_DIR ?= analytics/results/mopep-golden-shareable
 REMOTE_GOLDEN_DIR ?= /workspace/data/mopep-golden
 REMOTE_GOLDEN_PARENT = $(dir $(REMOTE_GOLDEN_DIR))
+GOVERNANCE_TEST_DIR ?= tests/governance
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup install test build verify test-whatsapp test-inference test-analytics check-quantization access-add \
+.PHONY: help setup install test build verify test-governance test-whatsapp test-inference test-analytics check-quantization access-add \
         setup-notebook notebook observability-dataset observability-notebook openai-silver-notebook silver-qwen benchmark-dataset benchmark-tags predict-benchmark \
         benchmark-local benchmark-remote eval-tunnel eval-check eval-models eval-datasets eval-run \
         eval-results eval-consolidate push-quantization-data push-imatrix-train quantization-doctor quantization-setup \
@@ -78,6 +79,7 @@ help:
 		'' \
 		'Validação:' \
 		'  make test                          Executa todos os testes e checks' \
+		'  make test-governance               Valida estrutura, links, specs, skills e ignore' \
 		'  make build                         Compila o adapter WhatsApp' \
 		'  make verify                        Executa testes e build' \
 		'  make test-whatsapp                 Executa os testes do adapter' \
@@ -130,12 +132,15 @@ access-add:
 	@test -n "$(PHONE)" || { echo 'Informe PHONE com país e DDD, somente dígitos.'; exit 1; }
 	cd apps/whatsapp-adapter && ./node_modules/.bin/tsx src/scripts/access-add.ts --phone "$(PHONE)"
 
-test: test-whatsapp test-inference test-analytics check-quantization
+test: test-governance test-whatsapp test-inference test-analytics check-quantization
 
 build:
 	npm --prefix apps/whatsapp-adapter run build
 
 verify: test build
+
+test-governance:
+	$(PYTHON) -m unittest discover -s $(GOVERNANCE_TEST_DIR) -p 'test_*.py' -v
 
 test-whatsapp:
 	npm --prefix apps/whatsapp-adapter test

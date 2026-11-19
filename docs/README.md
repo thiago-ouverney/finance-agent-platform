@@ -32,6 +32,9 @@ repetir os tutoriais de cada componente.
   UFF. [Executar o guia](guias/iniciar-whatsapp.md).
 - **ENTENDER OS NOTEBOOKS** — mostra a responsabilidade, as entradas, as saídas
   e a ordem de uso de cada notebook. [Consultar o índice](notebooks.md).
+- **PROPOR OU IMPLEMENTAR UMA MUDANÇA** — explica precedência, fontes de verdade,
+  specs, efeitos externos e gates. [Consultar a governança](../AGENTS.md) e o
+  [workflow de specs](../specs/README.md).
 
 ```text
 BMC + tags MOPEP
