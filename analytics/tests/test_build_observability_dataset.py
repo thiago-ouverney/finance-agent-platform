@@ -762,6 +762,13 @@ class BuildObservabilityDatasetTests(unittest.TestCase):
                 experiment_id="exp-local",
                 runtime="vllm",
             )
+            self.valid_run(
+                root / "results",
+                "ollama-complete-run",
+                status="complete",
+                experiment_id="exp-ollama-local",
+                runtime="ollama",
+            )
             dataset_dir = root / "dataset"
             build_observability_dataset(root / "results", dataset_dir)
 
@@ -770,7 +777,7 @@ class BuildObservabilityDatasetTests(unittest.TestCase):
                 "OBSERVABILITY_DATASET_DIR": str(dataset_dir),
                 "OBSERVABILITY_RUN_ID_VLLM": "exp-local",
                 "OBSERVABILITY_RUN_ID_LLAMA": "",
-                "OBSERVABILITY_RUN_ID_OLLAMA": "",
+                "OBSERVABILITY_RUN_ID_OLLAMA": "exp-ollama-local",
                 "MPLCONFIGDIR": str(root / "matplotlib"),
             }
             with warnings.catch_warnings(), patch.dict("os.environ", environment), patch(
