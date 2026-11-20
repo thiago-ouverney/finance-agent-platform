@@ -33,6 +33,7 @@ arquivo, não licença para imports cruzados ou dependência em estado local.
 |---|---|---|
 | `pipelines/qwen-quantization` | calibração, build, integridade e proveniência do modelo | serving, canal ou análise de runtime |
 | `services/inference-runtime` | lifecycle, requests, métricas e resultados dos runtimes | contato, lógica do canal ou avaliação analítica duplicada |
+| `services/inference-gateway` | admissão, fila, justiça e validação na frente do runtime | lifecycle do modelo, benchmark oficial ou canal WhatsApp |
 | `analytics` | datasets, workloads, métricas de qualidade, consolidação e análise | servir modelo ou medir novamente sinais do runtime |
 | `apps/whatsapp-adapter` | allowlist, sessão, conversa por contato e provider de chat | modelo, benchmark ou operação do runtime |
 | Makefile e `scripts` raiz | orquestração entre componentes | regra de negócio interna de um componente |
@@ -46,6 +47,8 @@ arquivo, não licença para imports cruzados ou dependência em estado local.
   outputs ignorados como dependência produtiva.
 - O adapter depende somente do contrato OpenAI-compatible do provider, não da
   implementação de Ollama, llama.cpp ou vLLM.
+- O gateway depende só da API HTTP OpenAI-compatible do runtime; o runtime não
+  importa o gateway.
 - O runtime consome modelo/tokenizer e workload identificados; não depende do
   notebook que os analisará.
 - Analytics consome manifests/resultados e produz novos artefatos por interfaces

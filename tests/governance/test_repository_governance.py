@@ -30,6 +30,7 @@ SCOPED_GUIDES = (
     "docs/AGENTS.md",
     "pipelines/qwen-quantization/AGENTS.md",
     "services/inference-runtime/AGENTS.md",
+    "services/inference-gateway/AGENTS.md",
 )
 
 SPEC_STATUSES = {"draft", "approved", "implemented", "superseded", "abandoned"}

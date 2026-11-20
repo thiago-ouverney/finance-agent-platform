@@ -48,6 +48,7 @@ pesos, dados privados ou resultados brutos.
 |---|---|---|
 | `apps/whatsapp-adapter` | canal WhatsApp, allowlist e histórico | [`AGENTS.md`](apps/whatsapp-adapter/AGENTS.md) |
 | `services/inference-runtime` | serving, benchmark e observabilidade | [`AGENTS.md`](services/inference-runtime/AGENTS.md) |
+| `services/inference-gateway` | admissão, fila e passthrough OpenAI-compatible | [`AGENTS.md`](services/inference-gateway/AGENTS.md) |
 | `pipelines/qwen-quantization` | construção e verificação de modelos | [`AGENTS.md`](pipelines/qwen-quantization/AGENTS.md) |
 | `analytics` | datasets, avaliações e análise | [`AGENTS.md`](analytics/AGENTS.md) |
 | `docs` | documentação canônica, runbooks e histórico | [`AGENTS.md`](docs/AGENTS.md) |
