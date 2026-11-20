@@ -163,6 +163,19 @@ avaliação exploratória isolada
 - **Comando:** `make mopep-performance-notebook`.
 - **Não faz:** inferência, geração de replay ou recálculo dos tercis.
 
+### [`analyze_concurrent_agents_middleware.ipynb`](../analytics/notebooks/analyze_concurrent_agents_middleware.ipynb)
+
+- **Responsabilidade:** ler a curva closed-loop do runtime nu (G2) e a fatia
+  pelo gateway (G4), mostrar o joelho operacional e o overhead do middleware,
+  e sustentar o `hypothesis_outcome` da spec
+  `concurrent-agents-middleware`.
+- **Entradas:** `services/inference-runtime/results-from-pod/g2/` e `.../g4/`
+  (ou o arquivo local `.../ge_g4/{g2,g4}/`), com 81 células cache-on no G2 e
+  15 via gateway no G4.
+- **Saídas:** tabelas e gráficos na sessão; não grava artefatos novos.
+- **Onde executa:** máquina local, sem Pod, túnel ou Prometheus.
+- **Não faz:** nova medição, eco/Macro-F1 (G2c) nem a demonstração ao vivo (G5).
+
 ## Fluxo EaaS
 
 ### [`build_eaas_business_model_canvas.ipynb`](../analytics/notebooks/build_eaas_business_model_canvas.ipynb)
